@@ -2,3 +2,4 @@ yfinance
 requests
 pandas
 pandas_datareader
+lxml
