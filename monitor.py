@@ -7,59 +7,87 @@ import pandas as pd
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+DB_FILE = "last_list.txt"
 
 def get_oas_data():
-    """从 FRED 获取高收益债利差"""
-    start = datetime.datetime.now() - datetime.timedelta(days=7)
-    end = datetime.datetime.now()
-    # BAMLH0A0HYM2: ICE BofA US High Yield Index Option-Adjusted Spread
-    df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
-    latest_oas = df.iloc[-1][0]
-    prev_oas = df.iloc[-2][0]
-    return latest_oas, latest_oas - prev_oas
-
-def monitor_all():
-    # 1. 获取宏观 OAS 风险指标
+    """获取美银美林高收益债利差"""
     try:
-        oas, oas_change = get_oas_data()
-        oas_status = "🟢 信用风险低" if oas < 5.0 else ("🟡 风险抬升" if oas < 6.5 else "🔴 衰退预警")
+        start = datetime.datetime.now() - datetime.timedelta(days=7)
+        df = web.DataReader("BAMLH0A0HYM2", "fred", start, datetime.datetime.now())
+        latest = df.iloc[-1][0]
+        prev = df.iloc[-2][0]
+        return latest, latest - prev
     except:
-        oas, oas_change, oas_status = 0, 0, "数据获取失败"
+        return None, None
 
-    # 2. 获取个股/ETF 动能 (SOXL)
-    symbol = "SOXL"
-    stock = yf.Ticker(symbol)
-    df_stock = stock.history(period="300d")
-    
-    latest_close = df_stock['Close'].iloc[-1]
-    latest_amt = latest_close * df_stock['Volume'].iloc[-1]
-    
-    # 计算 250 日连续成交额达标情况
+def get_qualified_list():
+    """监控池扫描：250日成交额 > 10亿"""
+    tickers = ["SOXL", "NVDA", "AMD", "TSM", "AVGO", "MSFT", "AAPL", "GOOGL", "AMZN", "META"]
+    qualified = []
     threshold = 1e9
-    df_stock['Amt'] = df_stock['Close'] * df_stock['Volume']
-    count = 0
-    for amt in reversed(df_stock['Amt']):
-        if amt >= threshold: count += 1
-        else: break
+    for s in tickers:
+        try:
+            df = yf.download(s, period="260d", progress=False)
+            if len(df) < 250: continue
+            df['Amt'] = df['Close'] * df['Volume']
+            if (df['Amt'].tail(250) > threshold).all():
+                qualified.append(s)
+        except: continue
+    return set(qualified)
 
-    # 3. 整合消息内容
-    msg = (
-        f"🏛️ 【宏观信用风险】\n"
-        f"HY OAS 利差: {oas:.2f}% ({oas_change:+.2f}%)\n"
-        f"宏观状态: {oas_status}\n\n"
-        f"🚀 【{symbol} 动能监控】\n"
-        f"今日收盘: ${latest_close:.2f}\n"
-        f"今日成交额: ${latest_amt/1e8:.2f} 亿\n"
-        f"250日连续达标: {count} 天\n\n"
-        f"💡 决策辅助：\n"
-        f"{'✅ 双指标看多' if count >= 250 and oas < 5.0 else '⚠️ 建议观望或减仓'}"
-    )
+def main():
+    # 1. 获取宏观数据
+    oas, oas_change = get_oas_data()
+    oas_status = "🟢 风险低" if oas and oas < 5.0 else ("🟡 风险抬升" if oas and oas < 6.5 else "🔴 衰退警报")
     
-    send_telegram_msg(msg)
+    # 2. 获取名单变动
+    current_set = get_qualified_list()
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            last_list = set(f.read().splitlines())
+    else:
+        last_list = set()
 
-def send_telegram_msg(text):
+    added = current_set - last_list
+    removed = last_list - current_set
+    stayed = sorted(list(current_set & last_list))
+
+    # 3. 构造 Markdown 报告
+    msg = f"📊 *美股量化复盘简报*\n"
+    msg += f"--------------------------------\n"
+    
+    # 宏观板块
+    if oas:
+        msg += f"🏛️ *宏观信用利差 (OAS)*\n"
+        msg += f"利差水平: `{oas:.2f}%` ({oas_change:+.2f}%)\n"
+        msg += f"风险评估: {oas_status}\n\n"
+
+    # 变动板块
+    msg += f"🚀 *250日/10亿量能榜*\n"
+    if added:
+        for s in added: msg += f"➕ *新晋:* `{s}` [NEW]\n"
+    if removed:
+        for s in removed: msg += f"➖ *掉出:* ~{s}~ (注意缩量)\n"
+    
+    # 存量板块
+    if stayed:
+        msg += f"\n✅ *持续在榜名单:*\n"
+        msg += f"`{', '.join(stayed)}`"
+    
+    msg += f"\n--------------------------------\n"
+    
+    # 综合建议
+    suggestion = "🚀 *建议策略：积极持有*" if oas < 5.0 and "SOXL" in current_set else "⚠️ *建议策略：谨慎观望*"
+    msg += f"💡 {suggestion}"
+
+    # 4. 发送并保存
+    send_msg(msg)
+    with open(DB_FILE, "w") as f:
+        f.write("\n".join(current_set))
+
+def send_msg(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text})
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
-    monitor_all()
+    main()
