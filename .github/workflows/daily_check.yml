@@ -1,0 +1,30 @@
+name: SOXL Volume Monitor
+
+on:
+  schedule:
+    # 美东时间收盘是 16:00，对应北京时间次日凌晨 05:00
+    # Cron 表达式使用 UTC 时间 (这里设为 21:05 UTC)
+    - cron: '5 21 * * 1-5' 
+  workflow_dispatch: # 允许你手动点击按钮测试运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/set-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance requests
+
+      - name: Run monitor
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
