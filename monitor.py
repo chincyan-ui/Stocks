@@ -38,10 +38,15 @@ def monitor_soxl():
 def send_telegram_msg(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text}
+    
+    print(f"正在尝试发送消息到 ID: {CHAT_ID}") # 调试信息
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        # 打印返回结果，如果失败，Telegram 会告诉我们原因
+        if response.status_code != 200:
+            print(f"发送失败，错误码：{response.status_code}")
+            print(f"错误响应：{response.text}")
+        else:
+            print("消息发送成功！")
     except Exception as e:
-        print(f"发送失败: {e}")
-
-if __name__ == "__main__":
-    monitor_soxl()
+        print(f"网络异常: {e}")
