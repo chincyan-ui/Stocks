@@ -1,52 +1,36 @@
-import yfinance as yf
 import requests
 import os
 
-# 从系统环境变量中读取敏感信息（为了安全，不直接写在代码里）
+# 1. 尝试读取环境变量
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-def monitor_soxl():
-    # 1. 获取 SOXL 数据
-    ticker = "SOXL"
-    stock = yf.Ticker(ticker)
-    df = stock.history(period="1d")
+def test_connection():
+    # 打印调试信息（注意：GitHub日志会部分隐藏Secret，这是正常的）
+    print(f"--- 调试信息 ---")
+    print(f"TOKEN 是否存在: {'Yes' if TOKEN else 'No'}")
+    print(f"CHAT_ID 是否存在: {'Yes' if CHAT_ID else 'No'}")
     
-    if df.empty:
+    if not TOKEN or not CHAT_ID:
+        print("错误：环境变量未成功加载，请检查 GitHub Secrets 配置！")
         return
-    
-    # 2. 计算成交额 (收盘价 * 成交量)
-    close_price = df['Close'].iloc[0]
-    volume = df['Volume'].iloc[0]
-    amount = close_price * volume
-    threshold = 1e9  # 10亿
-    
-    # 3. 逻辑判断与消息构造
-    status = "✅ 正常" if amount >= threshold else "⚠️ 警报"
-    message = (
-        f"【SOXL 成交额监控】\n"
-        f"当前状态：{status}\n"
-        f"今日收盘价：${close_price:.2f}\n"
-        f"今日成交额：${amount/1e8:.2f} 亿\n"
-        f"监控阈值：$10.00 亿"
-    )
-    
-    # 4. 如果触发警报或每日例行汇报，则发送消息
-    # 你可以设置为只要运行就发，或者只有跌破才发
-    send_telegram_msg(message)
 
-def send_telegram_msg(text):
+    # 2. 尝试发送测试消息
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text}
+    payload = {
+        "chat_id": CHAT_ID, 
+        "text": "🚀 链路测试成功！你的 GitHub Actions 已经可以与 Telegram 通信了。"
+    }
     
-    print(f"正在尝试发送消息到 ID: {CHAT_ID}") # 调试信息
     try:
         response = requests.post(url, json=payload)
-        # 打印返回结果，如果失败，Telegram 会告诉我们原因
-        if response.status_code != 200:
-            print(f"发送失败，错误码：{response.status_code}")
-            print(f"错误响应：{response.text}")
+        if response.status_code == 200:
+            print("✅ 成功！请检查你的 Telegram 窗口。")
         else:
-            print("消息发送成功！")
+            print(f"❌ 失败！错误码: {response.status_code}")
+            print(f"原因: {response.text}")
     except Exception as e:
-        print(f"网络异常: {e}")
+        print(f"❌ 网络异常: {e}")
+
+if __name__ == "__main__":
+    test_connection()
