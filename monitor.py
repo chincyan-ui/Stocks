@@ -13,45 +13,40 @@ import pandas as pd
 import pandas_datareader.data as web
 import datetime
 
+import pandas as pd
+import pandas_datareader.data as web
+import datetime
+import os
+
 def get_oas_history(days_count=7):
-    """
-    获取并显示美银美林高收益债利差最近 N 个交易日的数据
-    """
     try:
-        # 为了确保能凑够 7 个【交易日】，我们需要抓取大约 15 天的【自然日】数据
+        # 获取足够长的时间范围
         end = datetime.datetime.now()
-        start = end - datetime.timedelta(days=15)
+        start = end - datetime.timedelta(days=20)
         
-        # 获取数据
+        print(f"正在从 FRED 获取数据 ({start.date()} 至 {end.date()})...")
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
         
-        # 清洗：去空值
+        if df.empty:
+            raise ValueError("未能获取到数据，请检查网络或 FRED 状态。")
+            
         df = df.dropna()
-        
-        # 计算每日变动 (Difference)
         df['Daily_Change'] = df['BAMLH0A0HYM2'].diff()
         
-        # 只取最近的 7 行
-        recent_7_days = df.tail(days_count).copy()
+        result = df.tail(days_count)
         
-        # 格式化日期索引，只保留年月日
-        recent_7_days.index = recent_7_days.index.strftime('%Y-%m-%d')
+        print("\n--- 最近7个交易日美银美林高收益债利差(OAS) ---")
+        print(result)
+        return True
         
-        # 重命名列名以便阅读
-        recent_7_days.columns = ['OAS_Spread(%)', 'Daily_Change']
-        
-        return recent_7_days
-
     except Exception as e:
-        print(f"获取数据时出错: {e}")
-        return None
+        print(f"运行出错: {e}")
+        return False
 
-# 执行并打印结果
-df_oas = get_oas_history(7)
-if df_oas is not None:
-    print("--- 最近7个交易日美银美林高收益债利差(OAS) ---")
-    print(df_oas)
-
+if __name__ == "__main__":
+    success = get_oas_history()
+    if not success:
+        exit(1) # 如果失败，向 GitHub 发送错误信号
 def get_qualified_list():
     """监控池扫描：250日成交额 > 10亿"""
     tickers = ["SOXL", "NVDA", "AMD", "TSM", "AVGO", "MSFT", "AAPL", "GOOGL", "AMZN", "META"]
