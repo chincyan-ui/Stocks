@@ -1,41 +1,49 @@
 import cloudscraper
-from bs4 import BeautifulSoup
-import os
 import re
+import os
+import json
 
-def get_qqq_data():
-    # 方案 A: AlphaQuery (结构相对清晰)
-    url = "https://www.alphaquery.com/stock/QQQ/volatility-option-statistics/30-day/iv-percentile"
-    scraper = cloudscraper.create_scraper(browser='chrome')
+def get_qqq_iv_barchart():
+    # 使用 Barchart 的 QQQ 概览页
+    url = "https://www.barchart.com/etfs-funds/quotes/QQQ/technical-analysis"
     
+    # 模拟真实浏览器
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
+    )
+
     try:
+        # 1. 访问主页获取 Cookie
+        scraper.get("https://www.barchart.com/")
+        
+        # 2. 访问技术分析页
         resp = scraper.get(url, timeout=30)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            
-            # 定位具体标签：查找包含 "Indicator" 含义的类名
-            # AlphaQuery 的 IV Percentile 数值通常在 indicator-figure-large 类中
-            target = soup.find(class_='indicator-figure-large')
-            if target:
-                val = target.text.strip()
-                # 转换 0.2532 为 25.32%
-                try:
-                    num = float(val)
-                    if num < 1:
-                        return f"{num*100:.2f}%"
-                    return f"{num:.2f}%"
-                except:
-                    return val
+        
+        if resp.status_code != 200:
+            return f"访问失败: {resp.status_code}"
 
-        # 方案 B: 如果 A 失败，尝试从文本中精准截取
-        # 寻找 "30-Day IV Percentile is X.XXXX" 这种模式
-        match = re.search(r'30-Day IV Percentile is\s*(\d+\.?\d*)', resp.text)
+        # Barchart 的数据存储在 window.siteData 这种脚本块中
+        # 我们用正则提取隐含波动率相关的数据
+        # 匹配示例: "ivPercentile":25.4
+        match = re.search(r'"ivPercentile":\s*([\d\.]+)', resp.text)
+        
         if match:
-            return f"{float(match.group(1))*100:.2f}%"
+            iv_val = match.group(1)
+            return f"{iv_val}%"
+        
+        # 备选匹配方式
+        match_alt = re.search(r'IV Percentile.*?(\d+\.\d+)%', resp.text, re.IGNORECASE | re.DOTALL)
+        if match_alt:
+            return f"{match_alt.group(1)}%"
 
-        return "数据定位失败"
+        return "定位失败: 网站结构可能已更新"
+
     except Exception as e:
-        return f"错误: {str(e)}"
+        return f"异常: {str(e)}"
 
 def send_telegram(message):
     token = os.getenv('TG_TOKEN')
@@ -43,7 +51,6 @@ def send_telegram(message):
     if not token or not chat_id: return
 
     url = f"https://api.telegram.org/bot{token.strip()}/sendMessage"
-    # 使用 Markdown 让消息更美观
     payload = {
         "chat_id": chat_id.strip(),
         "text": message,
@@ -52,18 +59,18 @@ def send_telegram(message):
     cloudscraper.create_scraper().post(url, data=payload)
 
 if __name__ == "__main__":
-    iv_percentile = get_qqq_data()
+    iv_val = get_qqq_iv_barchart()
     
-    # 加上时间戳，防止 GitHub Actions 缓存结果
     from datetime import datetime
+    # 转换为北京时间（如果你在 GitHub Actions 运行，默认是 UTC）
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     msg = (
-        f"📊 *QQQ 指数监控*\n"
+        f"📊 *QQQ 波动率监控 (Barchart)*\n"
         f"━━━━━━━━━━━━━━\n"
-        f"📅 时间: `{now}`\n"
-        f"🔥 **IV Percentile**: `{iv_percentile}`\n"
+        f"⏰ 时间: `{now}`\n"
+        f"💎 **IV Percentile**: `{iv_val}`\n"
         f"━━━━━━━━━━━━━━\n"
-        f"🔗 [查看源网页](https://www.alphaquery.com/stock/QQQ/volatility-option-statistics/30-day/iv-percentile)"
+        f"🔗 [Barchart 详情](https://www.barchart.com/etfs-funds/quotes/QQQ/technical-analysis)"
     )
     send_telegram(msg)
