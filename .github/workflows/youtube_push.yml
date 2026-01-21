@@ -1,12 +1,12 @@
-name: YouTube Music Push
+name: YouTube Top10 MP3 Push
 
 on:
   schedule:
-    - cron: '0 10 * * *' # 每天北京时间 18:00 运行
-  workflow_dispatch:
+    - cron: '0 10 * * *' # 每天北京时间 18:00
+  workflow_dispatch: # 允许手动点击按钮运行
 
 jobs:
-  run_bot:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -14,11 +14,15 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install dependencies
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Install Python Dependencies
         run: |
           pip install yt-dlp requests
-      - name: Execute script
+      - name: Run
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python yt_news.py
+        run: python yt_audio_bot.py
