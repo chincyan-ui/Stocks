@@ -51,16 +51,6 @@ df_oas = get_oas_history(7)
 if df_oas is not None:
     print("--- 最近7个交易日美银美林高收益债利差(OAS) ---")
     print(df_oas)
-def get_oas_data():
-    """获取美银美林高收益债利差"""
-    try:
-        start = datetime.datetime.now() - datetime.timedelta(days=7)
-        df = web.DataReader("BAMLH0A0HYM2", "fred", start, datetime.datetime.now())
-        latest = df.iloc[-1][0]
-        prev = df.iloc[-2][0]
-        return latest, latest - prev
-    except:
-        return None, None
 
 def get_qualified_list():
     """监控池扫描：250日成交额 > 10亿"""
