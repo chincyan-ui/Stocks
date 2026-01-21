@@ -3,7 +3,7 @@ name: OAS Monitor
 on:
   schedule:
     # 每天美东收盘后运行（北京时间清晨 5:05 或 6:05）
-    - cron: '5 21 * * 1-5' 
+    - cron: '30 21 * * 1-5' 
   workflow_dispatch: # 保留手动测试按钮
 
 # 必须增加权限，否则 Actions 无法将 json 结果推送到你的仓库
