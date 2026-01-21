@@ -3,49 +3,71 @@ import pandas as pd
 import requests
 import os
 
-def get_ivp_and_send():
-    # 1. 获取数据
-    # VXN 是纳斯达克100的波动率指数，是计算 QQQ IVP 最权威的参考
-    ticker = "^VXN" 
-    data = yf.download(ticker, period="1y")
+def get_iv_metrics():
+    # 使用 ^VXN 作为 QQQ 的隐含波动率替代指标（最为权威且免费）
+    ticker_symbol = "^VXN"
     
-    if data.empty:
-        print("数据获取失败")
-        return
-
-    # 2. 计算 IVP
-    current_iv = data['Close'].iloc[-1].item()
-    min_iv = data['Close'].min().item()
-    max_iv = data['Close'].max().item()
+    # 获取过去 252 个交易日的数据（约等于 1 年）
+    ticker = yf.Ticker(ticker_symbol)
+    df = ticker.history(period="1y")
     
-    # IVP 公式: (当前值 - 最小值) / (最大值 - 最小值) * 100
-    ivp = (current_iv - min_iv) / (max_iv - min_iv) * 100
+    if df.empty:
+        return "❌ 无法获取数据，请检查网络或 yfinance 状态。"
 
-    # 3. 构造消息内容
-    message = (
-        f"📊 **QQQ 波动率日报 (基于VXN)**\n\n"
-        f"🔹 当前 IV (VXN): `{current_iv:.2f}`\n"
-        f"🔹 1年最低: `{min_iv:.2f}`\n"
-        f"🔹 1年最高: `{max_iv:.2f}`\n\n"
-        f"🔥 **当前 IVP: {ivp:.2f}%**\n"
-        f"*(IVP 越高，期权卖方越占优)*"
+    # 获取当前最新 IV 值
+    current_iv = df['Close'].iloc[-1]
+    
+    # --- 计算 IV Rank (IVR) ---
+    # 公式: (当前值 - 最小值) / (最大值 - 最小值)
+    min_iv = df['Close'].min()
+    max_iv = df['Close'].max()
+    iv_rank = (current_iv - min_iv) / (max_iv - min_iv) * 100
+
+    # --- 计算 IV Percentile (IVP) ---
+    # 公式: (过去一年中低于当前值的交易日数 / 总交易日数)
+    # 这通常是你在 Barchart/MarketChameleon 看到 70%+ 的原因
+    days_below = (df['Close'] < current_iv).sum()
+    total_days = len(df)
+    iv_percentile = (days_below / total_days) * 100
+
+    # 构造消息
+    msg = (
+        f"📊 **QQQ 波动率报告 (VXN 基准)**\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🕒 当前 IV 数值: `{current_iv:.2f}`\n\n"
+        f"🔥 **IV Percentile: {iv_percentile:.2f}%**\n"
+        f"*(过去一年中有 {iv_percentile:.1f}% 的时间 IV 低于现在)*\n\n"
+        f"📉 **IV Rank: {iv_rank:.2f}%**\n"
+        f"*(当前 IV 处于一年内高低区间的位置)*\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💡 **交易提示:**\n"
+        f"{'✅ IVP较高，适合卖出期权 (Sell Premium)' if iv_percentile > 60 else '⚠️ IVP较低，期权买方较便宜 (Buy Options)'}"
     )
+    return msg
 
-    # 4. 发送到 Telegram
+def send_telegram(text):
+    # 从环境变量获取密钥（GitHub Actions 安全设置）
     token = os.getenv("TG_BOT_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID")
+    
+    if not token or not chat_id:
+        print("错误: 未找到 TG_BOT_TOKEN 或 TG_CHAT_ID 环境变量")
+        return
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": message,
+        "text": text,
         "parse_mode": "Markdown"
     }
     
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        print("消息发送成功")
-    else:
-        print(f"发送失败: {response.text}")
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        print("✅ 消息发送成功")
+    except Exception as e:
+        print(f"❌ 发送失败: {e}")
 
 if __name__ == "__main__":
-    get_ivp_and_send()
+    report_text = get_iv_metrics()
+    send_telegram(report_text)
