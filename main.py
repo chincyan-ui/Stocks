@@ -1,37 +1,37 @@
 import requests
-import re
+from bs4 import BeautifulSoup
 import os
+import sys
 
-def get_qqq_iv():
-    # 尝试抓取 Barchart 或 AlphaQuery，这些网站对爬虫相对友好
-    # 这里我们仍以 Market Chameleon 为例，但大幅增强伪装
-    url = "https://marketchameleon.com/Overview/QQQ/IV/"
-    
+def get_qqq_iv_alphaquery():
+    # AlphaQuery QQQ 30天 IV Percentile 页面
+    url = "https://www.alphaquery.com/stock/QQQ/volatility-option-statistics/30-day/iv-percentile"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,.*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.google.com/'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
     try:
-        session = requests.Session()
-        resp = session.get(url, headers=headers, timeout=15)
+        print(f"正在访问: {url}")
+        response = requests.get(url, headers=headers, timeout=20)
         
-        if resp.status_code != 200:
-            return f"HTTP 错误: {resp.status_code}"
+        if response.status_code != 200:
+            return f"Error: 网页访问失败，状态码 {response.status_code}"
 
-        # 打印网页前 500 个字符到日志，方便我们分析被拦截时的样子
-        print(f"DEBUG - 网页片段: {resp.text[:500]}")
-
-        # 使用更宽松的正则匹配 IV Percentile
-        # 匹配文本如: "IV Percentile is 25%" 或 "25% IV Rank"
-        match = re.search(r'(\d+\.?\d*)\s*%', resp.text)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        if match:
-            return f"{match.group(1)}%"
+        # AlphaQuery 的数值通常在 class 为 indicator-figure-large 的 div 中
+        indicator = soup.find('div', class_='indicator-figure-large')
         
-        return "无法在页面找到百分比数值"
+        if indicator:
+            iv_value = indicator.text.strip()
+            # 转换成百分比格式 (如果是 0.2532 -> 25.32%)
+            try:
+                percent_val = float(iv_value) * 100
+                return f"{percent_val:.2f}%"
+            except ValueError:
+                return iv_value
+        else:
+            return "Error: 未能找到 IV 数值标签"
 
     except Exception as e:
         return f"脚本运行异常: {str(e)}"
@@ -39,16 +39,33 @@ def get_qqq_iv():
 def send_telegram(message):
     token = os.getenv('TG_TOKEN')
     chat_id = os.getenv('TG_CHAT_ID')
+    
     if not token or not chat_id:
-        print("错误: 环境变量 TG_TOKEN 或 TG_CHAT_ID 未设置")
+        print("错误: 环境变量 TG_TOKEN 或 TG_CHAT_ID 未设置，请检查 GitHub Secrets")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
+    payload = {
+        "chat_id": chat_id, 
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     
-    r = requests.post(url, data=payload)
-    print(f"Telegram 发送状态: {r.status_code}")
+    try:
+        r = requests.post(url, data=payload)
+        if r.status_code == 200:
+            print("Telegram 消息发送成功！")
+        else:
+            print(f"Telegram 发送失败: {r.text}")
+    except Exception as e:
+        print(f"发送过程发生异常: {e}")
 
 if __name__ == "__main__":
-    iv_val = get_qqq_iv()
-    send_telegram(f"📊 QQQ IV 监测\n最新数值: {iv_val}")
+    iv_val = get_qqq_iv_alphaquery()
+    
+    # 构造推送内容
+    content = f"🔔 *QQQ IV Percentile 提醒*\n\n"
+    content += f"📈 **最新数值**: `{iv_val}`\n"
+    content += f"🔗 [点击查看详情](https://www.alphaquery.com/stock/QQQ/volatility-option-statistics/30-day/iv-percentile)"
+    
+    send_telegram(content)
