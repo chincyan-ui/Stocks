@@ -1,0 +1,29 @@
+name: Daily QQQ IVP Report
+
+on:
+  schedule:
+    # 每天美股收盘后运行（UTC时间 21:30，约北京时间凌晨 05:30）
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch: # 允许手动触发测试
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas requests
+
+      - name: Run script
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python qqq_ivp_bot.py
