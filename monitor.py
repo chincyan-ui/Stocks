@@ -5,14 +5,14 @@ import requests
 import os
 import pandas as pd
 
+# 配置环境
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 DB_FILE = "last_list.txt"
 
 def get_oas_data():
-    """获取美银美林高收益债利差及其最近7个交易日趋势"""
+    """获取美银美林高收益债利差 (FRED) 及其 7 日趋势"""
     try:
-        # 获取足够的数据以确保覆盖7个交易日
         start = datetime.datetime.now() - datetime.timedelta(days=15)
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, datetime.datetime.now())
         if df.empty: return None, None, []
@@ -27,24 +27,30 @@ def get_oas_data():
         return None, None, []
 
 def get_qqq_stats():
-    """获取QQQ当日的最高、最低价及涨跌幅"""
+    """获取QQQ当日行情(最高/最低/涨跌幅)"""
     try:
-        # 下载最近2天数据以确保包含最新完整交易日
-        qqq = yf.download("QQQ", period="2d", progress=False)
-        if isinstance(qqq.columns, pd.MultiIndex):
-            qqq.columns = qqq.columns.get_level_values(0)
+        # 获取5天数据确保对比准确
+        qqq_ticker = yf.Ticker("QQQ")
+        df = qqq_ticker.history(period="5d")
+        if df.empty: return None
+
+        # 兼容多级索引
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
             
-        latest_data = qqq.iloc[-1]
-        high = latest_data['High']
-        low = latest_data['Low']
-        close = latest_data['Close']
-        open_p = latest_data['Open']
-        change_pct = (close - open_p) / open_p * 100
-        
+        df = df.sort_index()
+
+        # 涨跌幅：(今日收盘 - 昨日收盘) / 昨日收盘
+        current_close = df['Close'].iloc[-1]
+        prev_close = df['Close'].iloc[-2]
+        high = df['High'].iloc[-1]
+        low = df['Low'].iloc[-1]
+        change_pct = (current_close - prev_close) / prev_close * 100
+
         return {
-            "high": high,
-            "low": low,
-            "close": close,
+            "high": high, 
+            "low": low, 
+            "close": current_close, 
             "change": change_pct
         }
     except Exception as e:
@@ -59,10 +65,11 @@ def get_qualified_list():
     
     for s in tickers:
         try:
-            df = yf.download(s, period="300d", progress=False)
+            df = yf.download(s, period="350d", progress=False)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             
+            # 计算成交额与均线
             avg_amt = (df['Close'] * df['Volume']).tail(250).mean()
             ma250 = df['Close'].rolling(window=250).mean().iloc[-1]
             current_price = df['Close'].iloc[-1]
@@ -73,15 +80,12 @@ def get_qualified_list():
     return set(qualified)
 
 def main():
-    # 1. 获取宏观数据
+    # 1. 数据抓取
     oas, oas_change, oas_list = get_oas_data()
-    oas_status = "🟢 风险低" if oas and oas < 5.0 else ("🟡 风险抬升" if oas and oas < 6.5 else "🔴 衰退警报")
-    
-    # 2. 获取 QQQ 数据
     qqq = get_qqq_stats()
-    
-    # 3. 获取名单变动
     current_set = get_qualified_list()
+    
+    # 2. 名单变动处理
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
             last_list = set(line.strip() for line in f if line.strip())
@@ -92,51 +96,50 @@ def main():
     removed = last_list - current_set
     stayed = sorted(list(current_set & last_list))
 
-    # 4. 构造 Markdown 报告
+    # 3. 构造报告
     msg = f"📊 *美股量化复盘 ({datetime.datetime.now().strftime('%Y-%m-%d')})*\n"
     msg += f"--------------------------------\n"
     
-    # QQQ 板块
+    # QQQ行情显示
     if qqq:
         msg += f"🔹 *QQQ 指数行情*\n"
-        msg += f"最高: `{qqq['high']:.2f}`\n"
-        msg += f"最低: `{qqq['low']:.2f}`\n"
+        msg += f"最高: `{qqq['high']:.2f}` | 最低: `{qqq['low']:.2f}`\n"
         msg += f"收盘: `{qqq['close']:.2f}` (`{qqq['change']:+.2f}%`)\n\n"
 
-    # 宏观板块
+    # 宏观OAS显示
     if oas:
+        oas_status = "🟢 风险低" if oas < 5.0 else ("🟡 风险抬升" if oas < 6.5 else "🔴 衰退警报")
         msg += f"🏛️ *宏观信用利差 (OAS)*\n"
         msg += f"最新: `{oas:.2f}%` ({oas_change:+.2f}%)\n"
         msg += f"7日趋势: `{' → '.join([f'{x:.2f}' for x in oas_list])}`\n"
         msg += f"评估: {oas_status}\n\n"
 
-    # 变动板块
-    msg += f"🚀 *量能+趋势双强榜*\n"
+    # 个股榜单显示
+    msg += f"🚀 *250日/10亿/MA250 榜单*\n"
     if added:
         for s in sorted(added): msg += f"➕ *新晋:* `{s}`\n"
     if removed:
         for s in sorted(removed): msg += f"➖ *掉出:* ~{s}~\n"
-    
     if stayed:
-        msg += f"✅ *在榜:* `{', '.join(stayed)}`"
+        msg += f"✅ *持续在榜:* `{', '.join(stayed)}`"
     
     msg += f"\n--------------------------------\n"
     
     # 策略建议
-    suggestion = "🚀 *策略：积极持有*" if oas and oas < 5.0 and "SOXL" in current_set else "⚠️ *策略：防守避险*"
+    suggestion = "🚀 *建议策略：积极持有*" if oas and oas < 5.0 and "SOXL" in current_set else "⚠️ *建议策略：谨慎观望*"
     msg += f"💡 {suggestion}"
 
-    # 5. 发送并保存
+    # 4. 发送并保存
     send_msg(msg)
     with open(DB_FILE, "w") as f:
         f.write("\n".join(current_set))
 
 def send_msg(text):
-    if not TOKEN or not CHAT_ID: 
-        print(text)
-        return
+    if not TOKEN or not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"})
+    try:
+        requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
 if __name__ == "__main__":
     main()
