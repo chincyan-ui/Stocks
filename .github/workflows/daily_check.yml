@@ -1,4 +1,4 @@
-name: SOXL Volume Monitor
+name: OAS Monitor
 
 on:
   schedule:
@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run monitor
+      - name: Run monitor2
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
