@@ -11,22 +11,34 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 DB_FILE = "last_list.json" 
 
+def get_sp500_tickers():
+    """实时从维基百科获取标普500成分股名单"""
+    try:
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        table = pd.read_html(url)
+        df = table[0]
+        # 修正部分代码格式（如用 . 替换 -）
+        tickers = df['Symbol'].str.replace('.', '-', regex=False).tolist()
+        # 加入一些成交额极大的常用 ETF
+        extra_tickers = ["QQQ", "SPY", "SOXL", "TQQQ", "SQQQ", "TSLL", "IWM"]
+        return list(set(tickers + extra_tickers))
+    except Exception as e:
+        print(f"获取S&P 500名单失败: {e}")
+        # 备选基础名单
+        return ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B", "UNH", "LLY"]
+
 def get_oas_data():
     """获取美银美林高收益债利差 (FRED) 及其 7 日趋势"""
     try:
-        # 抓取过去15天数据以确保剔除节假日后仍有7个交易日
         start = datetime.datetime.now() - datetime.timedelta(days=15)
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, datetime.datetime.now())
         if df.empty: return None, None, []
-        
-        # 准确提取最近 7 个交易日
         recent_df = df.dropna().tail(7)
         oas_list = recent_df["BAMLH0A0HYM2"].tolist()
         latest = oas_list[-1]
         prev = oas_list[-2]
         return latest, latest - prev, oas_list
-    except Exception as e:
-        print(f"OAS获取失败: {e}")
+    except:
         return None, None, []
 
 def get_qqq_stats():
@@ -35,7 +47,6 @@ def get_qqq_stats():
         df = yf.Ticker("QQQ").history(period="5d")
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        df = df.sort_index()
         curr, prev = df.iloc[-1], df.iloc[-2]
         return {
             "high": curr['High'], "low": curr['Low'], 
@@ -44,62 +55,63 @@ def get_qqq_stats():
     except:
         return None
 
-def get_today_billion_list():
-    """筛选当日成交额 > 10亿的股票"""
-    tickers = ["SOXL", "NVDA", "AMD", "TSM", "AVGO", "MSFT", "AAPL", "GOOGL", "AMZN", "META"]
+def get_today_billion_list(ticker_list):
+    """批量筛选当日成交额 > 10亿的股票"""
     today_list = []
     threshold = 1e9 
     
-    print("正在扫描当日成交额...")
-    for s in tickers:
+    print(f"正在扫描 {len(ticker_list)} 只股票的成交额...")
+    # 批量下载当日数据以提高效率
+    data = yf.download(ticker_list, period="1d", progress=False, group_by='ticker')
+    
+    for ticker in ticker_list:
         try:
-            # 下载最近1天的数据
-            df = yf.download(s, period="1d", progress=False)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            # 处理批量下载后的数据结构
+            df = data[ticker] if len(ticker_list) > 1 else data
+            if df.empty or 'Close' not in df: continue
             
-            if df.empty: continue
             latest = df.iloc[-1]
-            # 成交额 = 收盘价 * 成交量
-            today_amt = latest['Close'] * latest['Volume']
+            # 计算成交额 (估算值)
+            amt = latest['Close'] * latest['Volume']
             
-            if today_amt > threshold:
-                today_list.append(s)
-                print(f"✅ {s} 达标: {today_amt/1e9:.2f}B")
+            if amt > threshold:
+                today_list.append(ticker)
         except: continue
+        
+    print(f"扫描完成，共有 {len(today_list)} 只标的成交额超10亿。")
     return set(today_list)
 
 def main():
-    # 1. 获取数据
+    # 1. 获取标普500名单并扫描成交额
+    all_tickers = get_sp500_tickers()
+    today_set = get_today_billion_list(all_tickers)
+    
+    # 2. 获取其他宏观/指数数据
     oas, oas_change, oas_list = get_oas_data()
     qqq = get_qqq_stats()
-    today_set = get_today_billion_list()
     
-    # 2. 处理 JSON 历史记录
+    # 3. 处理历史记录 (JSON)
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
-            try:
-                history_data = json.load(f)
+            try: history_data = json.load(f)
             except: history_data = {}
-    else:
-        history_data = {}
+    else: history_data = {}
 
-    # 3. 计算连续在榜逻辑
+    # 4. 核心逻辑：计算连续在榜天数
     new_data = {}
-    repeat_list = [] # 存储 (股票名, 持续天数)
+    repeat_list = []
     
     for s in today_set:
-        # 如果今天在榜，看看昨天在不在
         count = history_data.get(s, 0) + 1
         new_data[s] = count
-        if count >= 2: # 只有重复出现（2天及以上）才加入显示名单
+        if count >= 2: # 至少连续2天出现
             repeat_list.append((s, count))
 
-    # 按持续天数排序
+    # 按天数从大到小排序
     repeat_list.sort(key=lambda x: x[1], reverse=True)
 
-    # 4. 构造 Markdown 报告
-    msg = f"📊 *美股量化复盘 ({datetime.datetime.now().strftime('%Y-%m-%d')})*\n"
+    # 5. 构造报告内容
+    msg = f"📊 *美股全市场量化复盘 ({datetime.datetime.now().strftime('%Y-%m-%d')})*\n"
     msg += f"--------------------------------\n"
     
     if qqq:
@@ -108,30 +120,28 @@ def main():
         msg += f"高/低: `{qqq['high']:.2f}` / `{qqq['low']:.2f}`\n\n"
 
     if oas:
-        oas_status = "🟢 风险低" if oas < 5.0 else ("🟡 风险抬升" if oas < 6.5 else "🔴 衰退警报")
         msg += f"🏛️ *宏观信用利差 (OAS)*\n"
         msg += f"最新: `{oas:.2f}%` ({oas_change:+.2f}%)\n"
-        # 修正点：这里显示全部 7 天趋势
-        msg += f"7日趋势: `{' → '.join([f'{x:.2f}' for x in oas_list])}`\n"
-        msg += f"风险评估: {oas_status}\n\n"
+        msg += f"7日趋势: `{' → '.join([f'{x:.2f}' for x in oas_list])}`\n\n"
 
     msg += f"🔥 *资金持续活跃榜 (成交额 > 10亿)*\n"
+    msg += f"范围: S&P500成分股 + 核心ETF\n"
     if repeat_list:
-        for s, days in repeat_list:
-            msg += f"💎 `{s}`：已连续达标 `{days}` 天\n"
+        # 只取前 15 名，避免消息太长
+        for s, days in repeat_list[:15]:
+            msg += f"💎 `{s}`：持续 `{days}` 天\n"
+        if len(repeat_list) > 15:
+            msg += f"...等共 `{len(repeat_list)}` 只标的\n"
     else:
         msg += f"⚪ 今日暂无持续活跃(重复入榜)标的\n"
-        if today_set:
-            msg += f"_(注：今日有 {len(today_set)} 只个股新入榜)_ \n"
 
     msg += f"\n--------------------------------\n"
     
-    # 综合建议
-    active_tickers = [s for s, d in repeat_list]
-    suggestion = "🚀 *建议策略：积极持有*" if oas and oas < 5.0 and len(active_tickers) > 0 else "⚠️ *建议策略：谨慎观望*"
+    # 建议
+    suggestion = "🚀 *策略：积极持有*" if oas and oas < 5.0 and len(repeat_list) > 0 else "⚠️ *策略：谨慎观望*"
     msg += f"💡 {suggestion}"
 
-    # 5. 发送并回写 JSON
+    # 6. 发送并保存
     send_msg(msg)
     with open(DB_FILE, "w") as f:
         json.dump(new_data, f)
