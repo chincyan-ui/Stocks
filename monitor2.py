@@ -14,15 +14,18 @@ DB_FILE = "last_list.json"  # 更改为JSON格式存储天数
 def get_oas_data():
     """获取美银美林高收益债利差 (FRED) 及其 7 日趋势"""
     try:
+        # 获取足够数据以确保覆盖7个有效交易日
         start = datetime.datetime.now() - datetime.timedelta(days=15)
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, datetime.datetime.now())
         if df.empty: return None, None, []
+        
         recent_df = df.tail(7)
         oas_list = recent_df["BAMLH0A0HYM2"].tolist()
         latest = oas_list[-1]
         prev = oas_list[-2]
         return latest, latest - prev, oas_list
-    except:
+    except Exception as e:
+        print(f"OAS数据获取失败: {e}")
         return None, None, []
 
 def get_qqq_stats():
