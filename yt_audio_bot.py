@@ -7,41 +7,48 @@ def download_and_send():
     token = os.getenv("TG_BOT_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID")
     
-    # 榜单地址（YouTube Music 华语流行热榜）
-    list_url = "https://www.youtube.com/playlist?list=PLDfKAXSi6kUUnn_m6MInV7nS46VAn_7m8" 
+    # 更换为 YouTube Music 官方“华语流行歌曲热榜”链接 (全球通用且稳定)
+    list_url = "https://www.youtube.com/playlist?list=PLeHlpT96Y7S-YFndI_m301_p_A7XG7KzT" 
     
-    # 1. 提取榜单信息
     ydl_opts_info = {'quiet': True, 'extract_flat': True}
+    
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
         print("正在获取榜单信息...")
-        result = ydl.extract_info(list_url, download=False)
-        entries = result.get('entries', [])
+        try:
+            result = ydl.extract_info(list_url, download=False)
+            entries = result.get('entries', [])
+            if not entries:
+                print("错误：无法获取播放列表条目。")
+                return
+        except Exception as e:
+            print(f"提取列表失败: {e}")
+            return
 
-    # 2. 获取前20个视频的详细播放量并排序，筛选出前10名
     all_videos = []
-    for entry in entries[:20]:
+    # 增加检测数量到前 30 个，确保筛选出真正的高播放量
+    for entry in entries[:30]:
         video_url = f"https://www.youtube.com/watch?v={entry['id']}"
         try:
+            # 获取核心元数据（不下载）
             with yt_dlp.YoutubeDL({'quiet': True}) as ydl_detail:
                 info = ydl_detail.extract_info(video_url, download=False)
-                all_videos.append({
-                    'url': video_url,
-                    'views': info.get('view_count', 0),
-                    'title': info.get('title', 'Unknown Title'),
-                    'duration': info.get('duration', 0)
-                })
-        except Exception as e:
+                view_count = info.get('view_count', 0)
+                if view_count: # 确保获取到了播放量
+                    all_videos.append({
+                        'url': video_url,
+                        'views': view_count,
+                        'title': info.get('title', 'Unknown Title')
+                    })
+        except:
             continue
     
-    # 按播放量降序排序并取前10
+    # 按播放量排序并取前 10
     top_10 = sorted(all_videos, key=lambda x: x['views'], reverse=True)[:10]
 
-    # 3. 逐个转码并发送
     for i, item in enumerate(top_10, 1):
         print(f"正在处理第 {i}/10 首: {item['title']}")
         
         file_base = f"song_{i}"
-        # yt-dlp 配置：仅音频，转为 mp3，不写入封面
         ydl_opts_dl = {
             'format': 'bestaudio/best',
             'outtmpl': file_base,
@@ -50,7 +57,7 @@ def download_and_send():
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'writethumbnail': False, # 明确设置不下载封面图片
+            'writethumbnail': False,
             'quiet': True
         }
 
@@ -62,33 +69,24 @@ def download_and_send():
             
             if os.path.exists(mp3_path):
                 with open(mp3_path, 'rb') as audio:
-                    # 播放量显示格式化
-                    view_str = f"{item['views'] / 10000:.1f}万" if item['views'] < 10000000 else f"{item['views'] / 1000000:.1f}M"
-                    caption = f"🎵 TOP {i}: {item['title']}\n👁️ 播放量: {view_str}"
+                    view_display = f"{item['views'] / 10000:.1f}万" if item['views'] < 10000000 else f"{item['views'] / 1000000:.1f}M"
+                    caption = f"🎵 TOP {i}: {item['title']}\n👁️ 播放量: {view_display}"
                     
                     files = {'audio': audio}
                     data = {
                         'chat_id': chat_id, 
                         'caption': caption, 
-                        'title': item['title'], # 在播放器显示的标题
+                        'title': item['title'],
                         'parse_mode': 'Markdown'
                     }
                     
-                    # 发送音频
-                    resp = requests.post(f"https://api.telegram.org/bot{token}/sendAudio", files=files, data=data)
-                    if resp.status_code == 200:
-                        print(f"✅ 已成功推送")
-                    else:
-                        print(f"❌ 推送失败: {resp.text}")
+                    requests.post(f"https://api.telegram.org/bot{token}/sendAudio", files=files, data=data)
                 
-                # 清理文件
                 os.remove(mp3_path)
-            
-            # 短暂休眠，防止触发 Telegram API 频率限制
-            time.sleep(3)
+            time.sleep(3) # 避开 TG 频率限制
             
         except Exception as e:
-            print(f"处理错误: {e}")
+            print(f"处理第 {i} 首时出错: {e}")
 
 if __name__ == "__main__":
     download_and_send()
