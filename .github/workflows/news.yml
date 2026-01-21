@@ -2,9 +2,8 @@ name: Daily News Push
 
 on:
   schedule:
-    # 每天北京时间早上 8:00 运行 (UTC 0:00)
     - cron: '0 0 * * *'
-  workflow_dispatch: # 允许手动点击按钮测试
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install feedparser requests
+          pip install feedparser requests googletrans==4.0.0-rc1
 
       - name: Run bot
         env:
