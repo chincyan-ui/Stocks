@@ -1,0 +1,28 @@
+name: Daily IV Push
+
+on:
+  schedule:
+    # 每天美股收盘后（例如北京时间凌晨 5:00，对应 UTC 21:00）运行
+    - cron: '0 21 * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run Scraper
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py
