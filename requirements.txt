@@ -3,3 +3,4 @@ requests
 pandas
 pandas_datareader
 lxml
+beautifulsoup4
