@@ -1,6 +1,6 @@
 yfinance
 requests
-pandas
+pandas==1.5.3
 pandas_datareader
 lxml
 beautifulsoup4
