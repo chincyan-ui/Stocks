@@ -5,17 +5,12 @@ on:
     - cron: '30 21 * * 1-5' 
   workflow_dispatch: 
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,22 +20,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 同时锁定 numpy 和 pandas 以确保二进制兼容性
+          # 继续保留版本锁定，防止二进制冲突和 API 错误
           pip install "numpy<2.0.0" "pandas<2.0.0"
-          pip install yfinance pandas_datareader requests lxml html5lib
+          pip install yfinance pandas_datareader requests
 
       - name: Run monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python monitor2.py
-
-      - name: Commit and push changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          if [ -f "last_list.json" ]; then
-            git add last_list.json
-            git commit -m "Update daily tracking data" || echo "No changes to commit"
-            git push
-          fi
