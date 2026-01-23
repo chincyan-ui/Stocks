@@ -1,5 +1,6 @@
 import os
 import requests
+import pandas as pd
 from tigeropen.quote.quote_client import QuoteClient
 from tigeropen.tiger_open_config import TigerOpenClientConfig
 from tigeropen.common.consts import Language, Market
@@ -9,7 +10,10 @@ def send_tg(text):
     chat_id = os.getenv("TG_CHAT_ID")
     if not token or not chat_id: return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    requests.post(url, data={'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'})
+    try:
+        requests.post(url, data={'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'})
+    except Exception as e:
+        print(f"Telegram 推送失败: {e}")
 
 def get_client():
     config = TigerOpenClientConfig()
@@ -22,28 +26,30 @@ def get_client():
 def main():
     try:
         client = get_client()
-        print("正在调用 get_trade_rank 获取热度排名...")
+        print("正在从 DataFrame 获取美股排名...")
 
-        # 2026版 SDK 正确方法名：get_trade_rank
+        # 获取排名，返回结果通常是 pandas.DataFrame
         rankings = client.get_trade_rank(Market.US)
 
-        if not rankings:
-            send_tg("⚠️ 未能获取到成交排名数据。")
+        # --- 修复点：使用 .empty 判断 DataFrame ---
+        if rankings is None or (isinstance(rankings, pd.DataFrame) and rankings.empty):
+            send_tg("⚠️ 未能获取到成交排名数据（结果为空）。")
             return
 
-        # 排名通常按热度/成交额降序，我们取前 3
-        top_3 = rankings[:3]
+        # 只要前 3 行
+        top_3 = rankings.head(3)
         
         msg = ["🐯 **美股收盘成交额/热度 Top 3**"]
-        for i, row in enumerate(top_3, 1):
-            # 兼容性读取属性：latest_price, symbol, amount
-            symbol = getattr(row, 'symbol', 'N/A')
-            price = getattr(row, 'latest_price', 0)
-            # 某些版本可能叫 volume_trade 或 amount
-            amount = getattr(row, 'amount', getattr(row, 'volume_trade', 0))
+        
+        # 遍历 DataFrame 的行
+        for i, (index, row) in enumerate(top_3.iterrows(), 1):
+            # 这里的字段名 'symbol', 'latest_price', 'amount' 是老虎常用的
+            # 如果报错 KeyError，说明字段名不同
+            symbol = row.get('symbol', 'N/A')
+            price = row.get('latest_price', 0)
+            amount = row.get('amount', row.get('volume_trade', 0))
+            pre_close = row.get('pre_close', 0)
             
-            # 计算涨跌幅 (如果可用)
-            pre_close = getattr(row, 'pre_close', 0)
             change_str = ""
             if pre_close > 0:
                 change = ((price - pre_close) / pre_close) * 100
@@ -58,7 +64,12 @@ def main():
         print("推送成功！")
 
     except Exception as e:
-        send_tg(f"❌ 脚本执行失败: `{str(e)}`")
+        # 如果还是报错，打印出列名帮助调试
+        column_info = ""
+        if 'rankings' in locals() and isinstance(rankings, pd.DataFrame):
+            column_info = f"\n\n可用列名: `{list(rankings.columns)}`"
+        
+        send_tg(f"❌ 脚本执行失败: `{str(e)}`{column_info}")
 
 if __name__ == "__main__":
     main()
