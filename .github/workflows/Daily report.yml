@@ -2,8 +2,8 @@ name: Global Market Daily Report
 
 on:
   schedule:
-    # 北京时间早上 08:00 (UTC 00:00) 运行，周二到周六运行
-    - cron: '0 0 * * 2-6'
+    # 北京时间 08:15 (UTC 00:15)
+    - cron: '15 0 * * 2-6'
   workflow_dispatch:
 
 jobs:
@@ -20,6 +20,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          python -m pip install --upgrade pip
+          # 关键：先安装指定版本的 numpy
+          pip install numpy==1.26.4
           pip install -r requirements.txt
 
       - name: Run Script
