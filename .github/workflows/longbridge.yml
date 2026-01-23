@@ -1,32 +1,35 @@
-name: Longbridge Daily Report
+name: LongPort Daily Turnover Report
 
 on:
   schedule:
-    # 北京时间早上 5:30 运行 (美股收盘后) -> UTC 时间 21:30
-    - cron: '30 21 * * 1-5'
-  workflow_dispatch: # 支持手动运行
+    # 每天美股收盘后运行 (北京时间早上 5:00 对应 UTC 21:00)
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch: # 允许手动点击运行进行测试
 
 jobs:
-  report:
+  build_and_run:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip install longbridge-python requests
+          python -m pip install --upgrade pip
+          pip install longport requests
 
-      - name: Run Script
+      - name: Run LongPort Script
         env:
+          # 在 GitHub Settings -> Secrets -> Actions 中配置这些变量
           LB_APP_KEY: ${{ secrets.LB_APP_KEY }}
           LB_APP_SECRET: ${{ secrets.LB_APP_SECRET }}
           LB_ACCESS_TOKEN: ${{ secrets.LB_ACCESS_TOKEN }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python longbridge_top.py
+        run: python longport_top.py
