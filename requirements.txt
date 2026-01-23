@@ -1,15 +1,6 @@
 numpy==1.26.4
 yfinance
-akshare
-pandas_datareader
 pandas
-requests
-pytz
-requests
-pandas==1.5.3
 pandas_datareader
-lxml
-beautifulsoup4
-cloudscraper
-akshare
+requests
 pytz
