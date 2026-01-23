@@ -1,9 +1,8 @@
 import os
 import requests
-import pandas as pd
 from tigeropen.quote.quote_client import QuoteClient
 from tigeropen.tiger_open_config import TigerOpenClientConfig
-from tigeropen.common.consts import Language, Market, MarketRankingField
+from tigeropen.common.consts import Language, Market
 
 # --- 工具函数：发送 Telegram 消息 ---
 def send_tg(text):
@@ -27,15 +26,11 @@ def send_tg(text):
 
 # --- 核心逻辑：获取老虎 API 客户端 ---
 def get_client():
-    # 修正版：不再在 __init__ 中传 sandbox 参数
     config = TigerOpenClientConfig()
     config.tiger_id = os.getenv("TIGER_ID")
     config.private_key = os.getenv("TIGER_PRIVATE_KEY")
     config.language = Language.zh_CN
-    
-    # 显式设置环境：False 为实盘，True 为模拟盘
-    config.sandbox = False 
-    
+    config.sandbox = False  # 实盘环境
     return QuoteClient(config)
 
 def main():
@@ -43,15 +38,15 @@ def main():
         client = get_client()
         print("正在获取美股成交额排行榜...")
 
-        # 获取美股市场排名（按成交额 AMOUNT 排序）
-        # 返回的是一个包含 StockRanking 对象的列表
+        # 修正点：直接使用字符串 'amount' 代替 MarketRankingField.AMOUNT
+        # 如果报错，请尝试将 'amount' 更改为 'Amount' (部分版本区分大小写)
         rankings = client.get_market_rankings(
             market=Market.US, 
-            field=MarketRankingField.AMOUNT
+            field='amount' 
         )
 
-        if not rankings:
-            send_tg("⚠️ 未获取到今日行情数据，请检查市场是否开盘。")
+        if not rankings or len(rankings) == 0:
+            send_tg("⚠️ 未获取到行情数据。请确认：\n1. 账户是否有美股行情权限\n2. 当前是否为结算维护时间")
             return
 
         # 提取前 3 名
@@ -59,19 +54,19 @@ def main():
         
         msg = ["🐯 **美股今日成交额 Top 3**"]
         for i, row in enumerate(top_3, 1):
-            symbol = row.symbol
-            # row 对象属性可能随版本变化，通常包含 latest_price, amount, pre_close
-            price = getattr(row, 'latest_price', 0)
-            amount = getattr(row, 'amount', 0)
-            pre_close = getattr(row, 'pre_close', 0)
+            # 兼容性处理：部分版本返回对象，部分返回字典
+            symbol = getattr(row, 'symbol', row.get('symbol') if isinstance(row, dict) else 'Unknown')
+            price = getattr(row, 'latest_price', row.get('latest_price', 0) if isinstance(row, dict) else 0)
+            amount = getattr(row, 'amount', row.get('amount', 0) if isinstance(row, dict) else 0)
+            pre_close = getattr(row, 'pre_close', row.get('pre_close', 0) if isinstance(row, dict) else 0)
             
             # 计算涨跌幅
             change_pct = ((price - pre_close) / pre_close * 100) if pre_close else 0
-            # 成交额换算为亿美元
+            # 成交额换算为亿美元 (老虎 amount 单位通常为元)
             amount_usd = amount / 1e8
 
             msg.append(f"{i}. **{symbol}**")
-            msg.append(f"   💰 成交额: ${amount_usd:.2f} 亿")
+            msg.append(f"   💸 成交额: ${amount_usd:.2f} 亿")
             msg.append(f"   📈 价格: ${price:.2f} ({change_pct:+.2f}%)")
         
         msg_text = "\n".join(msg)
@@ -81,6 +76,7 @@ def main():
     except Exception as e:
         error_msg = f"❌ 脚本运行出错:\n`{str(e)}`"
         print(error_msg)
+        # 如果是字段名错误，尝试打印出 row 的所有属性辅助排查
         send_tg(error_msg)
 
 if __name__ == "__main__":
