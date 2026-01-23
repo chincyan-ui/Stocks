@@ -19,7 +19,6 @@ def get_oas_data():
         start = end - datetime.timedelta(days=30)
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
         recent_df = df.dropna()
-        if len(recent_df) < 2: return None, None, []
         oas_list = recent_df.iloc[-7:, 0].tolist()
         return oas_list[-1], oas_list[-1] - oas_list[-2], oas_list
     except:
@@ -30,9 +29,6 @@ def get_qqq_stats():
     try:
         ticker = yf.Ticker("QQQ")
         df = ticker.history(period="2y", auto_adjust=True)
-        if df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
         ath = df['Close'].max()
         curr = df.iloc[-1]
         prev = df.iloc[-2]
@@ -45,65 +41,66 @@ def get_qqq_stats():
     except:
         return None
 
-def get_us_active_av():
-    """获取美股成交金额排行 (按 Price * Volume 重新排序)"""
-    if not AV_KEY:
-        return []
+def get_accurate_top_traded():
+    """综合名单补全法：动态榜单 + 核心吸金权重股"""
+    # 1. 初始候选池（美股历史上成交额最稳的12只巨头）
+    candidate_pool = {"NVDA", "TSLA", "AAPL", "AMD", "AMZN", "MSFT", "META", "GOOGL", "NFLX", "AVGO", "SMCI", "INTC"}
     
-    url = f'https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey={AV_KEY}'
-    
-    for attempt in range(2):
+    # 2. 尝试从 Alpha Vantage 获取今日动态活跃股补充进池子
+    if AV_KEY:
+        url = f'https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey={AV_KEY}'
         try:
-            r = requests.get(url, timeout=20)
+            r = requests.get(url, timeout=15)
             data = r.json()
-            
-            if "Note" in data or "Information" in data:
-                time.sleep(20)
-                continue
+            active_list = data.get('most_actively_traded', [])
+            for item in active_list[:10]:
+                candidate_pool.add(item.get('ticker'))
+        except:
+            print("AV接口调用失败，仅使用核心池排序")
+
+    # 3. 使用 yfinance 批量获取候选池的精准盘后/收盘数据
+    results = []
+    try:
+        # yfinance 的 download 接口获取数据比单个 Ticker 更快
+        tickers_str = " ".join(candidate_pool)
+        data = yf.download(tickers_str, period="1d", group_by='ticker', progress=False)
+        
+        for ticker in candidate_pool:
+            try:
+                # 处理单只股票返回格式差异
+                df = data[ticker] if len(candidate_pool) > 1 else data
+                if df.empty: continue
                 
-            raw_active = data.get('most_actively_traded', [])
-            if not raw_active:
-                return []
-            
-            # 核心逻辑：计算成交金额并重新排序
-            processed_list = []
-            for stock in raw_active:
-                try:
-                    price = float(stock.get('price', 0))
-                    volume = float(stock.get('volume', 0))
-                    # 成交金额 = 价格 * 成交量
-                    turnover = price * volume
-                    
-                    processed_list.append({
-                        "symbol": stock.get('ticker'),
-                        "price": price,
-                        "change": float(stock.get('change_percentage', "0").strip('%')),
-                        "turnover": turnover
-                    })
-                except:
-                    continue
-            
-            # 按成交金额（turnover）降序排列，取前三
-            top_3_by_amount = sorted(processed_list, key=lambda x: x['turnover'], reverse=True)[:3]
-            return top_3_by_amount
-            
-        except Exception as e:
-            print(f"Alpha Vantage 请求异常: {e}")
-            time.sleep(5)
-    return []
+                # 使用典型价格(Typical Price)计算成交额以接近富途的VWAP口径
+                # 公式: (High + Low + Close) / 3 * Volume
+                tp = (df['High'].iloc[-1] + df['Low'].iloc[-1] + df['Close'].iloc[-1]) / 3
+                vol = df['Volume'].iloc[-1]
+                turnover = tp * vol
+                
+                results.append({
+                    "symbol": ticker,
+                    "price": float(df['Close'].iloc[-1]),
+                    "change": float((df['Close'].iloc[-1] / df['Open'].iloc[-1] - 1) * 100),
+                    "turnover": turnover
+                })
+            except:
+                continue
+    except Exception as e:
+        print(f"yfinance 批量获取失败: {e}")
+
+    # 4. 按成交金额降序排列
+    final_top_3 = sorted(results, key=lambda x: x['turnover'], reverse=True)[:3]
+    return final_top_3
 
 def format_amount(amount):
-    """格式化成交金额显示 (亿元/百万)"""
-    if amount >= 1e9:
-        return f"${amount/1e9:.2f}B"
-    elif amount >= 1e6:
-        return f"${amount/1e6:.1f}M"
-    return f"${amount:.0f}"
+    """格式化为美元显示"""
+    if amount >= 1e9: return f"${amount/1e9:.2f}B"
+    return f"${amount/1e6:.1f}M"
 
 def send_msg(text):
     if not TOKEN or not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}, timeout=20)
+    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=20)
 
 def main():
     tz = pytz.timezone('Asia/Shanghai')
@@ -111,10 +108,10 @@ def main():
 
     oas, oas_change, oas_list = get_oas_data()
     qqq = get_qqq_stats()
-    active_stocks = get_us_active_av()
+    # 核心算法更新
+    active_stocks = get_accurate_top_traded()
     
-    msg = f"📊 *美股收盘复盘 (成交金额排行版)*\n"
-    msg += f"时间: `{date_str}`\n"
+    msg = f"📊 *美股收盘复盘 (吸金榜精修版)*\n时间: `{date_str}`\n"
     msg += f"--------------------------------\n"
     
     if qqq:
@@ -123,7 +120,7 @@ def main():
         msg += f"{dd_icon} 距高点回撤: `{qqq['drawdown']:.2f}%` (ATH: `{qqq['ath']:.1f}`)\n\n"
         
     if oas:
-        msg += f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` (`{oas_change:+.2f}%`)\n"
+        msg += f"🏛️ *利差 (OAS)*: `{oas:.2f}%` (`{oas_change:+.2f}%`)\n"
         msg += f"趋势: `{'→'.join([f'{x:.2f}' for x in oas_list[-5:]])}`\n\n"
 
     if active_stocks:
@@ -131,14 +128,10 @@ def main():
         for i, s in enumerate(active_stocks, 1):
             amount_str = format_amount(s['turnover'])
             msg += f"{i}. `{s['symbol']}` | `${s['price']:.2f}` | `{s['change']:+.2f}%` | `{amount_str}`\n"
-    else:
-        msg += f"⚠️ *美股成交榜单抓取失败*\n"
-
+    
     msg += "--------------------------------\n"
-    if qqq and oas:
-        status = "🚀 *策略：强趋势*" if qqq['drawdown'] > -3 and oas < 4.0 else "⚠️ *策略：防范回调*" if qqq['drawdown'] < -10 or oas > 5.0 else "⚖️ *策略：中性震荡*"
-        msg += f"💡 {status}"
-
+    msg += "💡 _注：采用典型价格(Typical Price)估算成交额_"
+    
     send_msg(msg)
 
 if __name__ == "__main__":
