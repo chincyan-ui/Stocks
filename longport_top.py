@@ -4,13 +4,13 @@ import requests
 from longport.openapi import QuoteContext, Config
 
 def get_tsla_turnover():
-    # 1. 检查环境变量
-    app_key = os.getenv("LONGPORT_APP_KEY")
-    app_secret = os.getenv("LONGPORT_APP_SECRET")
+    # 1. 检查环境变量 (全部统一为 LB_ 前缀)
+    app_key = os.getenv("LB_APP_KEY")
+    app_secret = os.getenv("LB_APP_SECRET")
     access_token = os.getenv("LB_ACCESS_TOKEN")
     
     if not all([app_key, app_secret, access_token]):
-        print("错误: 缺少长桥 API 配置 (Key/Secret/Token)")
+        print("错误: 缺少长桥 API 配置 (LB_APP_KEY/LB_APP_SECRET/LB_ACCESS_TOKEN)")
         sys.exit(1)
 
     # 2. 初始化长桥配置
@@ -23,7 +23,6 @@ def get_tsla_turnover():
     # 3. 获取数据
     with QuoteContext(config) as ctx:
         # 获取 TSLA.US 最近 3 天的日 K 线
-        # 成交额字段为 turnover
         candlesticks = ctx.history_candlesticks("TSLA.US", period="day", count=3)
         
         if not candlesticks:
@@ -31,8 +30,8 @@ def get_tsla_turnover():
 
         msg_lines = ["🚗 **Tesla (TSLA) 最近3天成交额报表**"]
         for candle in candlesticks:
-            # 格式化日期和成交额（换算为亿美元）
             date_str = candle.timestamp.strftime('%Y-%m-%d')
+            # 成交额换算为亿美元
             turnover_bn = float(candle.turnover) / 10**8
             msg_lines.append(f"📅 {date_str}: `${turnover_bn:.2f}` 亿")
         
@@ -43,7 +42,7 @@ def send_telegram(text):
     chat_id = os.getenv("TG_CHAT_ID")
     
     if not token or not chat_id:
-        print("错误: 缺少 Telegram 配置 (Token/Chat ID)")
+        print("错误: 缺少 Telegram 配置 (TG_BOT_TOKEN/TG_CHAT_ID)")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
