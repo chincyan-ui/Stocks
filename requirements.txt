@@ -5,3 +5,5 @@ pandas_datareader
 lxml
 beautifulsoup4
 cloudscraper
+akshare
+pytz
