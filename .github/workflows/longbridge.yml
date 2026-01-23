@@ -1,0 +1,32 @@
+name: Longbridge Daily Report
+
+on:
+  schedule:
+    # 北京时间早上 5:30 运行 (美股收盘后) -> UTC 时间 21:30
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch: # 支持手动运行
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install longbridge-python requests
+
+      - name: Run Script
+        env:
+          LB_APP_KEY: ${{ secrets.LB_APP_KEY }}
+          LB_APP_SECRET: ${{ secrets.LB_APP_SECRET }}
+          LB_ACCESS_TOKEN: ${{ secrets.LB_ACCESS_TOKEN }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python longbridge_top.py
