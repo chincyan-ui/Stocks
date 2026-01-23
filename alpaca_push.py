@@ -1,73 +1,39 @@
 import os
 import requests
 
-# --- 从 GitHub Secrets 获取 ---
-API_KEY = os.getenv('ALPACA_API_KEY')
-SECRET_KEY = os.getenv('ALPACA_SECRET_KEY')
-TG_TOKEN = os.getenv('TG_TOKEN')
-TG_CHAT_ID = os.getenv('TG_CHAT_ID')
+# 1. 这里的变量名必须与 GitHub Secrets 严格一致
+key_id = os.getenv('ALPACA_API_KEY', '').strip()
+secret = os.getenv('ALPACA_SECRET_KEY', '').strip()
 
-def send_tg(text):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, data={'chat_id': TG_CHAT_ID, 'text': text, 'parse_mode': 'Markdown'})
-
-def main():
-    # 验证 Key 是否有效 (针对 Paper 账户使用 paper-api 域名)
-    auth_test_url = "https://paper-api.alpaca.markets/v2/account"
+def diag():
+    # 强制尝试 Paper API 路径
+    url = "https://paper-api.alpaca.markets/v2/account"
     
     headers = {
-        "APCA-API-KEY-ID": API_KEY,
-        "APCA-API-SECRET-KEY": SECRET_KEY,
-        "Content-Type": "application/json"
+        "APCA-API-KEY-ID": key_id,
+        "APCA-API-SECRET-KEY": secret
     }
 
-    # 第一步：先测试鉴权
-    test_res = requests.get(auth_test_url, headers=headers)
-    if test_res.status_code != 200:
-        error_info = f"❌ Alpaca 鉴权失败 (401): 请检查 Paper Key 是否正确。\n响应内容: {test_res.text}"
-        print(error_info)
-        send_tg(error_info)
-        return
-
-    # 第二步：抓取行情数据
-    # 注意：Alpaca 免费版行情数据请求地址
-    data_url = "https://data.alpaca.markets/v2/stocks/snapshots"
-    symbols = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC"]
+    print(f"--- 诊断开始 ---")
+    print(f"Key ID 长度: {len(key_id)} 位")
+    print(f"Secret 长度: {len(secret)} 位")
     
     try:
-        res = requests.get(data_url, headers=headers, params={"symbols": ",".join(symbols)})
-        res.raise_for_status()
-        data = res.json()
-
-        stock_stats = []
-        for symbol, info in data.items():
-            # 提取价格和成交量
-            daily = info.get('dailyBar', {})
-            price = info.get('latestTrade', {}).get('p', 0)
-            volume = daily.get('v', 0)
-            prev_close = info.get('prevDailyBar', {}).get('c', 0)
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            print("✅ 鉴权通过！正在获取行情...")
+            # 鉴权通过后尝试行情
+            data_url = "https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL"
+            data_res = requests.get(data_url, headers=headers)
+            print(f"行情数据状态: {data_res.status_code}")
+            print(f"行情返回: {data_res.text[:100]}")
+        else:
+            print(f"❌ 依旧 401！")
+            print(f"Headers 检查: APCA-API-KEY-ID 是不是拼错了？")
+            print(f"API 返回原始信息: {res.text}")
             
-            if price > 0:
-                amount = price * volume
-                change = ((price - prev_close) / prev_close * 100) if prev_close else 0
-                stock_stats.append({
-                    'symbol': symbol, 'price': price, 'amount': amount, 'change': change
-                })
-
-        # 按成交额排序
-        top_3 = sorted(stock_stats, key=lambda x: x['amount'], reverse=True)[:3]
-
-        msg = ["🏔️ **Alpaca (Paper) 美股成交额榜**"]
-        for i, s in enumerate(top_3, 1):
-            msg.append(f"{i}. **{s['symbol']}**")
-            msg.append(f"   💰 价格: ${s['price']:.2f} ({s['change']:+.2f}%)")
-            msg.append(f"   📊 估算成交额: ${s['amount']/1e8:.2f} 亿")
-
-        send_tg("\n".join(msg))
-        print("Success!")
-
     except Exception as e:
-        send_tg(f"❌ 行情抓取失败: `{str(e)}`")
+        print(f"网络异常: {e}")
 
 if __name__ == "__main__":
-    main()
+    diag()
