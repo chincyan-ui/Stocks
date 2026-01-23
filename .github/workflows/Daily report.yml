@@ -1,32 +1,43 @@
 name: Global Market Daily Report
 
+# 配置运行触发条件
 on:
   schedule:
-    # 北京时间 08:15 (UTC 00:15)
-    - cron: '15 0 * * 2-6'
-  workflow_dispatch:
+    # 每天北京时间早上 08:30 运行 (UTC 00:30)
+    # 周二至周六运行，对应美股周一至周五的收盘数据
+    - cron: '30 0 * * 2-6'
+  workflow_dispatch: # 允许你随时在 GitHub 页面手动点击运行进行测试
 
 jobs:
-  build:
+  run_market_report:
     runs-on: ubuntu-latest
+    
     steps:
+      # 1. 检出仓库代码
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # 2. 安装 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip' # 开启缓存，加快后续运行速度
 
+      # 3. 安装依赖库
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # 关键：先安装指定版本的 numpy
+          # 显式安装指定版本 numpy 解决 ValueError 兼容性报错
           pip install numpy==1.26.4
-          pip install -r requirements.txt
+          # 安装项目所需的其他库
+          pip install yfinance pandas pandas_datareader requests pytz
 
+      # 4. 执行 Python 脚本
       - name: Run Script
         env:
+          # 从 GitHub Secrets 中读取变量并注入环境变量
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
         run: python main.py
