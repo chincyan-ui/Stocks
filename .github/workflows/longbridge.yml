@@ -2,16 +2,16 @@ name: TSLA Turnover Push
 
 on:
   schedule:
-    # 每天北京时间早上 6:30 执行 (对应 UTC 22:30)
+    # 每天北京时间 06:30 执行
     - cron: '30 22 * * *'
-  workflow_dispatch: # 允许手动点击按钮立即测试
+  workflow_dispatch: 
 
 jobs:
-  push_report:
+  run_sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -21,12 +21,12 @@ jobs:
       - name: Install dependencies
         run: pip install longport requests
 
-      - name: Run Script
+      - name: Execute Script
         env:
-          LONGPORT_APP_KEY: ${{ secrets.LONGPORT_APP_KEY }}
-          LONGPORT_APP_SECRET: ${{ secrets.LONGPORT_APP_SECRET }}
-          LONGPORT_ACCESS_TOKEN: ${{ secrets.LONGPORT_ACCESS_TOKEN }}
+          # 环境变量名已全部更新为 LB_
+          LB_APP_KEY: ${{ secrets.LB_APP_KEY }}
+          LB_APP_SECRET: ${{ secrets.LB_APP_SECRET }}
+          LB_ACCESS_TOKEN: ${{ secrets.LB_ACCESS_TOKEN }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        # 这里已更新为你的新文件名
         run: python longport_top.py
