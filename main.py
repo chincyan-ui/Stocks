@@ -6,77 +6,129 @@ import os
 import pandas as pd
 import pytz
 
-# 从环境变量读取
+# ================= 配置环境 =================
+# 从环境变量读取安全信息
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_oas_data():
+    """获取美银美林高收益债利差 (FRED)"""
     try:
-        # 设置 User-Agent 防止被拒绝访问
+        # 设置时间窗口
         end = datetime.datetime.now()
         start = end - datetime.timedelta(days=30)
-        # FRED 偶尔会有网络波动，加入重试逻辑
+        
+        # 获取 FRED 数据
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
         recent_df = df.dropna()
-        if recent_df.empty: return None, None, []
         
+        if recent_df.empty:
+            return None, None, []
+        
+        # 获取数值
         oas_list = recent_df.iloc[-7:, 0].tolist()
-        return oas_list[-1], oas_list[-1] - oas_list[-2], oas_list
-    except:
+        current_oas = float(oas_list[-1])
+        prev_oas = float(oas_list[-2])
+        change = current_oas - prev_oas
+        
+        return current_oas, change, oas_list
+    except Exception as e:
+        print(f"OAS 获取失败: {e}")
         return None, None, []
 
 def get_qqq_stats():
+    """获取 QQQ 行情及回撤数据"""
     try:
         ticker = yf.Ticker("QQQ")
+        # 获取 2 年数据以计算历史高点 (ATH)
         df = ticker.history(period="2y")
-        if df.empty: return None
         
+        if df.empty:
+            return None
+        
+        # 计算核心指标
         ath = df['Close'].max()
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
+        curr_price = df['Close'].iloc[-1]
+        prev_price = df['Close'].iloc[-2]
+        
+        change_pct = (curr_price - prev_price) / prev_price * 100
+        drawdown = (curr_price / ath - 1) * 100
         
         return {
-            "close": float(curr['Close']),
-            "change": float((curr['Close'] - prev['Close']) / prev['Close'] * 100),
-            "drawdown": float((curr['Close'] / ath - 1) * 100),
+            "close": float(curr_price),
+            "change": float(change_pct),
+            "drawdown": float(drawdown),
             "ath": float(ath)
         }
-    except:
+    except Exception as e:
+        print(f"QQQ 获取失败: {e}")
         return None
 
 def send_msg(text):
-    if not TOKEN or not CHAT_ID: return
+    """发送 Telegram 消息"""
+    if not TOKEN or not CHAT_ID:
+        print("错误: 未配置 TELEGRAM_TOKEN 或 TELEGRAM_CHAT_ID")
+        return
+        
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=20)
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=20)
+        response.raise_for_status()
+        print("消息发送成功")
+    except Exception as e:
+        print(f"消息发送失败: {e}")
 
 def main():
+    # 1. 设置时区并获取当前时间
     tz = pytz.timezone('Asia/Shanghai')
-    date_str = datetime.datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+    now = datetime.datetime.now(tz)
+    date_str = now.strftime('%Y-%m-%d %H:%M')
 
+    # 2. 获取数据
     oas, oas_change, oas_list = get_oas_data()
     qqq = get_qqq_stats()
     
-    # 如果没获取到 QQQ 数据且是非交易日，就不推送
+    # 3. 如果 QQQ 数据获取失败（通常发生在非交易日），则跳过推送
     if not qqq:
-        print("今日无交易数据")
+        print("未获取到当日交易数据，跳过推送。")
         return
 
+    # 4. 构建消息模板
     msg = f"📊 *美股收盘简报*\n时间: `{date_str}`\n"
     msg += f"--------------------------------\n"
     
-    dd_icon = "🟢" if qqq['drawdown'] > -10 else "🔴"
+    # QQQ 部分
+    # 根据回撤幅度显示不同图标：回撤超过10%显示黄色，超过20%显示红色
+    dd_val = qqq['drawdown']
+    if dd_val > -5:
+        dd_icon = "🟢" 
+    elif dd_val > -15:
+        dd_icon = "🟡"
+    else:
+        dd_icon = "🔴"
+
     msg += f"🔹 *QQQ (纳指100)*\n"
     msg += f"收盘: `{qqq['close']:.2f}` (`{qqq['change']:+.2f}%`)\n"
     msg += f"{dd_icon} 距高点回撤: `{qqq['drawdown']:.2f}%` (ATH: `{qqq['ath']:.1f}`)\n\n"
         
-    if oas:
-        trend = "📈" if oas_change > 0 else "📉"
-        msg += f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` ({trend} `{oas_change:+.2f}%`)\n"
-        msg += f"趋势: `{'→'.join([f'{x:.2f}' for x in oas_list[-5:]])}`\n"
+    # 利差部分
+    if oas is not None:
+        trend_icon = "📈" if oas_change > 0 else "📉"
+        msg += f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` ({trend_icon} `{oas_change:+.2f}%`)\n"
+        # 取最近5个点展示趋势
+        recent_trend = " → ".join([f"{x:.2f}" for x in oas_list[-5:]])
+        msg += f"趋势: `{recent_trend}`\n"
 
     msg += "--------------------------------\n"
-    msg += "💡 _数据源: Yahoo Finance & FRED_"
+    msg += "💡 _提示：OAS 异常升高通常预示流动性收紧_"
     
+    # 5. 执行发送
     send_msg(msg)
 
 if __name__ == "__main__":
