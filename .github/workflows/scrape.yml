@@ -1,44 +1,45 @@
 name: Moomoo Scraper
 
-# 触发条件
 on:
   schedule:
-    # 这里的 cron 时间是 UTC 时间
-    # 14:30 UTC 对应北京时间 22:30（美股开盘后半小时，数据较活跃）
+    # UTC 14:30 对应北京时间 22:30（美股开盘后）
     - cron: '30 14 * * 1-5'
-  workflow_dispatch: # 允许你在 GitHub 页面手动点击按钮运行
+  workflow_dispatch: # 支持手动点击运行
 
 jobs:
   run-scraper:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu 环境
+    runs-on: ubuntu-latest # 目前指向 Ubuntu 24.04
 
     steps:
-      # 1. 拉取仓库代码
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-          cache: 'pip' # 开启缓存，加快后续运行速度
+          cache: 'pip'
 
-      # 3. 安装 Python 依赖库
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. 安装 Playwright 浏览器内核及系统依赖 (核心修复步骤)
-      - name: Install Playwright Browsers
+      - name: Fix Linux Dependencies and Install Playwright
         run: |
-          python -m playwright install chromium --with-deps
+          # 1. 核心修复：手动安装 Ubuntu 24.04 版本的音频和图形库
+          sudo apt-get update
+          sudo apt-get install -y libasound2t64 libgbm1
+          
+          # 2. 升级 Playwright 到最新版以获得更好的系统兼容性
+          pip install --upgrade playwright
+          
+          # 3. 安装浏览器内核（跳过可能出错的自动依赖安装，因为上面已经手动补齐了）
+          python -m playwright install chromium
 
-      # 5. 执行抓取并推送脚本
       - name: Execute Scraper
         env:
-          # 从 GitHub Secrets 中读取敏感信息
+          # 确保你在 GitHub Settings -> Secrets 中配置了这两个变量
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scraper.py
