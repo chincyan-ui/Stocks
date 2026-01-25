@@ -1,4 +1,4 @@
-name: 每日股价监控
+name: 纳斯达克100监控
 
 on:
   schedule:
