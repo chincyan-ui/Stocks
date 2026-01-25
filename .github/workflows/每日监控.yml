@@ -7,7 +7,8 @@ on:
   workflow_dispatch: 
 
 jobs:
-  运行监控:
+  run-monitor:  # 这里修改了：ID 必须使用英文或下划线
+    name: 执行监控任务  # 显示名称可以继续用中文
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -25,5 +26,5 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        # 确保这里的文件名和你的 py 文件名一致
+        # 确保这里的文件名和你的 py 文件名完全一致
         run: python 监控脚本.py
