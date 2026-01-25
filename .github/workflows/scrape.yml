@@ -2,18 +2,19 @@ name: Moomoo Scraper
 
 on:
   schedule:
-    - cron: '0 14 * * 1-5' # 美股开盘前后运行（UTC 时间 14:00，约北京时间 22:00）
-  workflow_dispatch:      # 允许手动点击运行
+    # 每天美股开盘后运行 (UTC 14:30 是北京时间 22:30)
+    - cron: '30 14 * * 1-5'
+  workflow_dispatch: # 支持点击 Run workflow 手动运行
 
 jobs:
-  build:
+  run-scraper:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
 
@@ -22,7 +23,7 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium --with-deps
 
-      - name: Run scraper
+      - name: Execute Scraper
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
