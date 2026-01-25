@@ -4,4 +4,4 @@ pandas
 pandas_datareader
 requests
 pytz
-playwright
+playwright==1.40.0
