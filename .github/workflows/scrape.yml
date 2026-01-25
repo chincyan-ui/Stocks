@@ -2,9 +2,8 @@ name: Moomoo Scraper
 
 on:
   schedule:
-    # 每天美股开盘后运行 (UTC 14:30 是北京时间 22:30)
     - cron: '30 14 * * 1-5'
-  workflow_dispatch: # 支持点击 Run workflow 手动运行
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -20,9 +19,14 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          playwright install chromium --with-deps
 
+      # 关键修复点：使用特定的 action 来安装浏览器及其系统依赖
+      - name: Ensure browsers are installed
+        run: |
+          npx playwright install --with-deps chromium
+          
       - name: Execute Scraper
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
