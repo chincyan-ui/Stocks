@@ -2,6 +2,6 @@ numpy==1.26.4
 yfinance
 pandas
 pandas_datareader
-requests
 pytz
-playwright==1.40.0
+playwright>=1.44.0
+requests>=2.31.0
