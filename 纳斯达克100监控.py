@@ -3,19 +3,18 @@ import pandas as pd
 import requests
 import os
 
-# 1. 更新后的标的列表
+# 1. 更新后的标的列表 (已根据你的要求精准替换)
 TICKERS = [
-    "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "ALGN", "ALNY", "AMAT", 
-    "AMD", "AMGN", "AMZN", "ANSS", "APP", "ARM", "ASML", "AVGO", "AZN", "BIIB", 
-    "BKNG", "BKR", "CDNS", "CCEP", "CEG", "CHTR", "CPNG", "CRWD", "CSCO", "CSX", 
-    "CTAS", "CTSH", "DASH", "DDOG", "DLTR", "DXCM", "EA", "EXCW", "FANG", "FAST", 
-    "FER", "FTNT", "GEHC", "GILD", "GOOG", "GOOGL", "HON", "IDXX", "ILMN", "INSM", 
-    "INTC", "INTU", "ISRG", "KDP", "KHC", "KLAC", "LRCX", "LULU", "MAR", "MCHP", 
-    "MDB", "MELI", "META", "MNST", "MPWR", "MRVL", "MSFT", "MU", "NFLX", "NVDA", 
-    "NXPI", "ODFL", "ON", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP", "PLTR", 
-    "PYPL", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SNPS", "SHOP", "STX", "TEAM", 
-    "TMUS", "TSLA", "TXN", "TTWO", "VRTX", "VRSK", "VTRS", "WBA", "WBD", "WDC", 
-    "WDAY", "WMT", "XEL", "ZS"
+    "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "ALNY", "AMAT", "AMD", 
+    "AMGN", "AMZN", "APP", "ARM", "ASML", "AVGO", "AXON", "BKNG", "BKR", "CCEP", 
+    "CDNS", "CEG", "CHTR", "CMCSA", "COST", "CPRT", "CRWD", "CSCO", "CSGP", "CSX", 
+    "CTAS", "CTSH", "DASH", "DDOG", "DXCM", "EA", "EXC", "FANG", "FAST", "FER", 
+    "FTNT", "GEHC", "GILD", "GOOG", "GOOGL", "HON", "IDXX", "INSM", "INTC", "INTU", 
+    "ISRG", "KDP", "KHC", "KLAC", "LIN", "LRCX", "MAR", "MCHP", "MDLZ", "MELI", 
+    "META", "MNST", "MPWR", "MRVL", "MSFT", "MSTR", "MU", "NFLX", "NVDA", "NXPI", 
+    "ODFL", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP", "PLTR", "PYPL", "QCOM", 
+    "REGN", "ROP", "ROST", "SBUX", "SHOP", "SNPS", "STX", "TEAM", "TMUS", "TRI", 
+    "TSLA", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "WDC", "WMT", "XEL", "ZS"
 ]
 
 # 配置 Telegram 环境变量
@@ -35,15 +34,15 @@ def 获取回撤报告():
 
     for ticker in TICKERS:
         try:
-            # 检查该股票数据是否存在于返回结果中
+            # 兼容 yfinance 返回的 MultiIndex 结构
             if ticker not in data.columns.levels[0]:
                 continue
                 
             df = data[ticker].dropna()
-            if df.empty or len(df) < 5: # 过滤掉新上市或无数据标的
+            if df.empty or len(df) < 5: 
                 continue
             
-            # 计算回撤：基于历史所有交易日的盘中最高价
+            # 计算回撤：基于历史所有交易日的盘中最高价 (ATH)
             ath = df['High'].max()
             current_price = df['Close'].iloc[-1]
             drawdown = (current_price - ath) / ath * 100
@@ -64,11 +63,10 @@ def 获取回撤报告():
     结果列表.sort(key=lambda x: x['drawdown'])
     
     # 构建报告内容
-    top_n = 15  # 增加到前15名，因为你的列表变长了
+    top_n = 15  
     消息 = [f"📊 **回撤观察名单 (Top {top_n})**", "---"]
     
     for i, item in enumerate(结果列表[:top_n], 1):
-        # 跌幅超过 40% 用严重警报，30% 用普通警报
         if item['drawdown'] < -40:
             tag = "🆘"
         elif item['drawdown'] < -25:
