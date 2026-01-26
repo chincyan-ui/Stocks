@@ -1,4 +1,4 @@
-name: 每日股价监控
+name: 重点股票监控
 
 on:
   schedule:
