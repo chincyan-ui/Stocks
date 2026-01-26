@@ -7,7 +7,7 @@ on:
   workflow_dispatch: 
 
 jobs:
-  执行自动化分析:
+  main:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
