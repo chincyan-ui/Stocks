@@ -1,0 +1,32 @@
+name: 每日美股自动分析
+
+on:
+  schedule:
+    # 每天北京时间早上 7:05 自动执行
+    - cron: '5 23 * * *'
+  workflow_dispatch: 
+
+jobs:
+  执行自动化分析:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+
+      - name: 安装 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安装依赖库
+        run: pip install pandas yfinance openpyxl requests
+
+      - name: 运行回撤计算脚本
+        # 这里的脚本名称必须与你仓库中的文件名完全一致
+        run: python "美股回撤计算器.py"
+
+      - name: 推送 Excel 结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: 最终回撤分析报告
+          path: "*.xlsx"
