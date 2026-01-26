@@ -2,11 +2,10 @@ import pandas as pd
 import requests
 import yfinance as yf
 from datetime import datetime
-import os
+import time
 
 def 获取全量并合并特定标的():
-    # 1. 获取全量千亿市值数据
-    print("正在从 Nasdaq 接口拉取全量美股名单...")
+    print("正在拉取全量美股名单及特定标的...")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json'
@@ -17,76 +16,70 @@ def 获取全量并合并特定标的():
         response = requests.get(url, headers=headers, timeout=30)
         data = response.json()['data']['rows']
         df_all = pd.DataFrame(data)
-        
-        # 清洗数据
         df_all['marketCap'] = df_all['marketCap'].str.replace('$', '', regex=False).str.replace(',', '', regex=False).replace('', '0').astype(float)
-        
-        # 筛选千亿市值
         门槛 = 1000 * 10**8
-        df_top = df_all[df_all['marketCap'] >= 门槛].copy()
-        api_symbols = df_top['symbol'].tolist()
-        print(f"API 扫描完成，发现 {len(api_symbols)} 家千亿市值公司。")
+        api_symbols = df_all[df_all['marketCap'] >= 门槛]['symbol'].tolist()
     except Exception as e:
-        print(f"API 获取失败: {e}，将仅使用指定标的列表。")
+        print(f"Nasdaq API 访问受限: {e}")
         api_symbols = []
 
-    # 2. 注入你指定的标的
     指定标的字符串 = "AAPL, ABNB, ADBE, ADI, ADP, ADSK, AEP, ALNY, AMAT, AMD, AMGN, AMZN, APP, ARM, ASML, AVGO, AXON, BKNG, BKR, CCEP, CDNS, CEG, CHTR, CMCSA, COST, CPRT, CRWD, CSCO, CSGP, CSX, CTAS, CTSH, DASH, DDOG, DXCM, EA, EXC, FANG, FAST, FER, FTNT, GEHC, GILD, GOOG, GOOGL, HON, IDXX, INSM, INTC, INTU, ISRG, KDP, KHC, KLAC, LIN, LRCX, MAR, MCHP, MDLZ, MELI, META, MNST, MPWR, MRVL, MSFT, MSTR, MU, NFLX, NVDA, NXPI, ODFL, ORLY, PANW, PAYX, PCAR, PDD, PEP, PLTR, PYPL, QCOM, REGN, ROP, ROST, SBUX, SHOP, SNPS, STX, TEAM, TMUS, TRI, TSLA, TTWO, TXN, VRSK, VRTX, WBD, WDAY, WDC, WMT, XEL, ZS"
     custom_symbols = [s.strip() for s in 指定标的字符串.split(',')]
     
-    # 3. 合并并去重
+    新面孔列表 = ["ALNY", "FER", "INSM", "MPWR", "STX", "WDC", "PLTR", "MSTR", "AXON"]
     最终名单 = list(set(api_symbols + custom_symbols))
-    print(f"合并去重完成，总计分析 {len(最终名单)} 个标的。")
-    return 最终名单
+    return 最终名单, 新面孔列表
 
-def 计算分析(代码列表):
+def 计算分析(代码列表, 新面孔列表):
     结果列表 = []
-    
+    print(f"总计分析 {len(代码列表)} 个标的...")
+
     for 代码 in 代码列表:
         try:
-            print(f"正在分析: {代码}...")
             股票 = yf.Ticker(代码)
-            # 获取历史数据 (auto_adjust=True 自动处理分红拆股)
+            # 获取最大历史数据
             历史数据 = 股票.history(period="max", auto_adjust=True)
-            
             if 历史数据.empty: continue
             
-            # 基础信息获取（用于获取公司名称和实时市值）
-            # 注意：这里如果太慢，可以考虑只拿价格
             info = 股票.info
-            名称 = info.get('longName', 代码)
-            市值 = info.get('marketCap', 0)
+            盘中最高 = 历史数据['High'].max()
+            当前价 = 历史数据['Close'].iloc[-1]
+            回撤 = (盘中最高 - 当前价) / 盘中最高
             
-            盘中历史最高价 = 历史数据['High'].max() 
-            当前价 = 历史数据['Close'].iloc[-1] 
-            回撤幅度 = (盘中历史最高价 - 当前价) / 盘中历史最高价
-            
+            # 组织数据，调整字段顺序，将“距最高回撤”前置
             结果列表.append({
+                '距最高回撤': 回撤,  # 移动到第一列
                 '股票代码': 代码,
-                '公司名称': 名称,
-                '市值(亿美元)': round(市值 / 10**8, 2) if 市值 else "N/A",
-                '当前收盘价(前复权)': round(当前价, 2),
-                '盘中历史最高价(前复权)': round(盘中历史最高价, 2),
-                '距盘中最高回撤幅度': 回撤幅度
+                '状态': "新纳入" if 代码 in 新面孔列表 else "常规",
+                '公司名称': info.get('longName', 代码),
+                '市值(亿美元)': round(info.get('marketCap', 0) / 10**8, 2) if info.get('marketCap') else 0,
+                '当前价': round(当前价, 2),
+                '历史最高': round(盘中最高, 2)
             })
+            # 稍微休眠防止被 Yahoo 封禁
+            time.sleep(0.1) 
         except Exception as e:
-            print(f"跳过 {代码}: {e}")
+            print(f"分析失败 {代码}: {e}")
             
-    结果表格 = pd.DataFrame(结果列表)
-    结果表格 = 结果表格.sort_values(by='距盘中最高回撤幅度', ascending=False)
-    结果表格['距盘中最高回撤幅度'] = 结果表格['距盘中最高回撤幅度'].apply(lambda x: f"{round(x * 100, 2)}%")
-    
-    return 结果表格
+    df = pd.DataFrame(结果列表).sort_values(by='距最高回撤', ascending=False)
+    return df
+
+def 导出Excel(df, 文件名):
+    # 使用 Styler 格式化百分比并添加高亮
+    def highlight_new(row):
+        return ['background-color: #FFFF00' if row['状态'] == '新纳入' else '' for _ in row]
+
+    # 导出
+    with pd.ExcelWriter(文件名, engine='openpyxl') as writer:
+        df.style.apply(highlight_new, axis=1)\
+                .format({'距最高回撤': '{:.2%}'})\
+                .to_excel(writer, index=False)
+    print(f"报告已生成: {文件名}")
 
 if __name__ == "__main__":
-    # 第一步：获取合并后的名单
-    全部待分析名单 = 获取全量并合并特定标的()
+    名单, 新面孔 = 获取全量并合并特定标的()
+    最终数据 = 计算分析(名单, 新面孔)
     
-    # 第二步：循环分析
-    最终结果 = 计算分析(全部待分析名单)
-    
-    # 第三步：保存
-    日期 = datetime.now().strftime('%Y年%m月%d日')
-    文件名 = f"美股综合回撤报告_{日期}.xlsx"
-    最终结果.to_excel(文件名, index=False)
-    print(f"\n报告已生成: {文件名}")
+    # 文件名建议固定或带日期，方便 GitHub 提交
+    文件名 = "US_Stock_Drawdown_Report.xlsx"
+    导出Excel(最终数据, 文件名)
