@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import os
 
-# 1. 更新后的标的列表 (已根据你的要求精准替换)
+# 1. 标的列表
 TICKERS = [
     "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "ALNY", "AMAT", "AMD", 
     "AMGN", "AMZN", "APP", "ARM", "ASML", "AVGO", "AXON", "BKNG", "BKR", "CCEP", 
@@ -17,24 +17,22 @@ TICKERS = [
     "TSLA", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "WDC", "WMT", "XEL", "ZS"
 ]
 
-# 配置 Telegram 环境变量
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def 获取回撤报告():
     print(f"🚀 正在下载 {len(TICKERS)} 只股票的历史数据...")
     
-    # 批量下载，threads=True 加速，auto_adjust=True 处理除权息
     try:
+        # 增加 period="max" 以确保计算的是历史最高位 (ATH)
         data = yf.download(TICKERS, period="max", auto_adjust=True, group_by='ticker', threads=True)
     except Exception as e:
         return f"❌ 下载失败: {e}"
 
     结果列表 = []
-
+    
     for ticker in TICKERS:
         try:
-            # 兼容 yfinance 返回的 MultiIndex 结构
             if ticker not in data.columns.levels[0]:
                 continue
                 
@@ -42,7 +40,7 @@ def 获取回撤报告():
             if df.empty or len(df) < 5: 
                 continue
             
-            # 计算回撤：基于历史所有交易日的盘中最高价 (ATH)
+            # 计算回撤
             ath = df['High'].max()
             current_price = df['Close'].iloc[-1]
             drawdown = (current_price - ath) / ath * 100
@@ -59,25 +57,35 @@ def 获取回撤报告():
     if not 结果列表:
         return "❌ 抱歉，未能获取到有效的股票分析数据。"
 
-    # 按照回撤百分比排序（跌幅最大的在前面）
+    # --- 新增功能：统计回撤超过 50% 的比例 ---
+    total_count = len(结果列表)
+    crash_count = len([x for x in 结果列表 if x['drawdown'] <= -50])
+    crash_ratio = (crash_count / total_count) * 100
+
+    # 排序：回撤最大的排在前面
     结果列表.sort(key=lambda x: x['drawdown'])
     
-    # 构建报告内容
-    top_n = 15  
-    消息 = [f"📊 **回撤观察名单 (Top {top_n})**", "---"]
+    # --- 构建报告内容 ---
+    消息 = [
+        "📊 **纳斯达克100成分股回撤统计**",
+        "---",
+        f"📈 统计样本：`{total_count}` 只股票",
+        f"⚠️ 回撤 > 50% 占比：**{crash_ratio:.2f}%** ({crash_count}只)",
+        "---",
+        f"🔥 **深蹲名单 (Top 15)**"
+    ]
     
-    for i, item in enumerate(结果列表[:top_n], 1):
-        if item['drawdown'] < -40:
+    for i, item in enumerate(结果列表[:15], 1):
+        if item['drawdown'] <= -50:
             tag = "🆘"
-        elif item['drawdown'] < -25:
+        elif item['drawdown'] <= -30:
             tag = "🚨"
         else:
             tag = "📉"
             
         消息.append(f"{i}. {tag} **{item['symbol']}**")
-        消息.append(f"    ▫️ 距最高位: `{item['drawdown']:.2f}%`")
-        消息.append(f"    ▫️ 现价/最高: `{item['current']:.2f}` / `{item['ath']:.2f}`")
-        消息.append("")
+        消息.append(f"   ▫️ 距最高位: `{item['drawdown']:.2f}%`")
+        消息.append(f"   ▫️ 价格: `{item['current']:.2f}` / ATH: `{item['ath']:.2f}`")
         
     return "\n".join(消息)
 
