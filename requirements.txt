@@ -5,3 +5,4 @@ pandas_datareader
 pytz
 playwright>=1.44.0
 requests>=2.31.0
+openpyxl
