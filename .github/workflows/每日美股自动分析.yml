@@ -2,12 +2,10 @@ name: 每日美股自动分析
 
 on:
   schedule:
-    # 每天北京时间早上 7:05 自动执行
     - cron: '5 23 * * *'
   workflow_dispatch: 
 
 jobs:
-  # 这里的 ID 改成英文以确保兼容性，显示名称用 name 定义
   run_analysis:
     name: 执行自动化分析任务
     runs-on: ubuntu-latest
@@ -25,12 +23,12 @@ jobs:
           pip install pandas yfinance openpyxl requests
 
       - name: 运行回撤计算脚本
-        # 这里的脚本名称必须与你仓库中的文件名完全一致
         run: python "美股回撤计算器.py"
 
-      - name: 上传结果文件
-        uses: actions/upload-artifact@v4
-        with:
-          name: US-Stock-Drawdown-Report
-          path: "*.xlsx"
-          retention-days: 90
+      - name: 将 Excel 提交到仓库
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add *.xlsx
+          git commit -m "自动更新回撤报告: $(date +'%Y-%m-%d')"
+          git push
