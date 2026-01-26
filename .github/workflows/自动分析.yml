@@ -2,13 +2,14 @@ name: 每日美股自动分析
 
 on:
   schedule:
-    # 每天北京时间早上 7:05 自动执行 (美股收盘后)
-    # 0 23 * * * 对应 UTC 时间 23:00，即北京时间次日 07:00
+    # 每天北京时间早上 7:05 自动执行
     - cron: '5 23 * * *'
-  workflow_dispatch: # 允许你在页面上手动点击 "Run workflow" 触发执行
+  workflow_dispatch: 
 
 jobs:
-  执行自动化分析:
+  # 这里的 ID 改成英文以确保兼容性，显示名称用 name 定义
+  run_analysis:
+    name: 执行自动化分析任务
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -24,15 +25,12 @@ jobs:
           pip install pandas yfinance openpyxl requests
 
       - name: 运行回撤计算脚本
-        # 注意：这里的文件名必须和你仓库里的 Python 脚本文件名完全一致
+        # 这里的脚本名称必须与你仓库中的文件名完全一致
         run: python "美股回撤计算器.py"
 
       - name: 上传结果文件
         uses: actions/upload-artifact@v4
         with:
-          # 关键修改：下载包的名称改为英文，避免下载链接失效
           name: US-Stock-Drawdown-Report
-          # 自动抓取目录下所有的 .xlsx 文件
           path: "*.xlsx"
-          # 设置保留天数（可选）
           retention-days: 90
