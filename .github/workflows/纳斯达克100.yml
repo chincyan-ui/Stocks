@@ -2,10 +2,10 @@ name: 纳斯达克100监控
 
 on:
   schedule:
-    # 稍微调整一下：每天 UTC 21:45 (北京时间 05:45)
-    # 1-5 是周一到周五（UTC），对应北京时间周二到周六凌晨
-    - cron: '45 21 * * 1-5' 
-  workflow_dispatch: # 保留手动触发按钮
+    # 北京时间凌晨 05:35 运行（美股通常在 05:00 或 06:00 收盘）
+    # 1-5 表示 UTC 的周一至周五，对应北京时间的周二至周六凌晨
+    - cron: '35 21 * * 1-5' 
+  workflow_dispatch: # 允许手动点击运行，方便测试
 
 jobs:
   run-monitor:
@@ -19,9 +19,9 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip' # 新增：开启缓存加快运行速度
+          cache: 'pip' # 缓存依赖，缩短运行时间
 
-      - name: 安装依赖
+      - name: 安装必要插件
         run: |
           python -m pip install --upgrade pip
           pip install yfinance pandas requests
@@ -30,5 +30,6 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        # 建议确认仓库里的文件名是否真的是这个
-        run: python 纳斯达克100监控.py
+          PYTHONIOENCODING: utf-8  # 强制 Python 使用 UTF-8 编码处理中文字符
+        # 使用引号包裹中文字符串文件名
+        run: python "纳斯达克100监控.py"
