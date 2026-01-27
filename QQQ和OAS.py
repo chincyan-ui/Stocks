@@ -11,33 +11,31 @@ from typing import Optional, Tuple
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-def get_yearly_stats(df: pd.DataFrame, col_name: str) -> str:
-    """计算多年份的最高/最低点及日期"""
+def get_oas_history_stats(df: pd.DataFrame) -> str:
+    """计算 2015-2025 OAS 的历年最高/最低点及日期"""
     stats_msg = []
-    # 确保索引是日期格式
     df.index = pd.to_datetime(df.index)
     
-    # 遍历 2020 到 2025
-    for year in range(2020, 2026):
+    for year in range(2015, 2026):
         year_data = df[df.index.year == year]
         if year_data.empty:
             continue
             
-        # 找到最高点和最低点
-        max_val = year_data[col_name].max()
-        min_val = year_data[col_name].min()
+        col = "BAMLH0A0HYM2"
+        max_val = year_data[col].max()
+        min_val = year_data[col].min()
         
-        max_date = year_data[year_data[col_name] == max_val].index[0].strftime('%m-%d')
-        min_date = year_data[year_data[col_name] == min_val].index[0].strftime('%m-%d')
+        max_date = year_data[year_data[col] == max_val].index[0].strftime('%m-%d')
+        min_date = year_data[year_data[col] == min_val].index[0].strftime('%m-%d')
         
         stats_msg.append(f"`{year}`: 高 `{max_val:.2f}`({max_date}) | 低 `{min_val:.2f}`({min_date})")
     
     return "\n".join(stats_msg)
 
 def get_oas_data():
-    """获取美银美林高收益债利差 (FRED) 及其历史统计"""
+    """获取美银美林高收益债利差 (2015-2025)"""
     try:
-        start = datetime.datetime(2020, 1, 1)
+        start = datetime.datetime(2015, 1, 1)
         end = datetime.datetime.now()
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
         df = df.dropna()
@@ -50,39 +48,40 @@ def get_oas_data():
         change = current_oas - prev_oas
         oas_list = df.iloc[-7:, 0].tolist()
         
-        # 计算 2020-2025 统计
-        history_report = get_yearly_stats(df, "BAMLH0A0HYM2")
-        
+        history_report = get_oas_history_stats(df)
         return current_oas, change, oas_list, history_report
     except Exception as e:
         print(f"⚠️ OAS 获取失败: {e}")
         return None, None, [], ""
 
-def get_qqq_stats():
-    """获取 QQQ 行情及 2020-2025 历史统计"""
+def get_qqq_stats() -> Optional[dict]:
+    """获取 QQQ 行情及盘中前复权 ATH"""
     try:
         ticker = yf.Ticker("QQQ")
-        # 抓取 2020 至今的数据
-        df = ticker.history(start="2020-01-01")
-        if df.empty:
+        # 获取上市以来所有数据以计算盘中 ATH
+        # auto_adjust=True 确保 High 和 Close 都是前复权数值
+        df_all = ticker.history(period="max", auto_adjust=True)
+        if df_all.empty:
             return None
             
-        ath = df['Close'].max()
-        curr_price = df['Close'].iloc[-1]
-        prev_price = df['Close'].iloc[-2]
+        # 1. 计算全历史盘中最高价及其日期
+        ath_val = df_all['High'].max()
+        ath_date = df_all[df_all['High'] == ath_val].index[-1].strftime('%Y-%m-%d')
         
+        # 2. 获取最新价格及涨跌 (基于最近两日收盘)
+        curr_price = df_all['Close'].iloc[-1]
+        prev_price = df_all['Close'].iloc[-2]
         change_pct = (curr_price - prev_price) / prev_price * 100
-        drawdown = (curr_price / ath - 1) * 100
         
-        # 计算 2020-2025 统计
-        history_report = get_yearly_stats(df, "Close")
+        # 3. 计算当前价格距离盘中 ATH 的回撤
+        drawdown = (curr_price / ath_val - 1) * 100
         
         return {
             "close": float(curr_price),
             "change": float(change_pct),
             "drawdown": float(drawdown),
-            "ath": float(ath),
-            "history": history_report
+            "ath_val": float(ath_val),
+            "ath_date": ath_date
         }
     except Exception as e:
         print(f"⚠️ QQQ 获取失败: {e}")
@@ -120,28 +119,32 @@ def main():
         return
         
     msg = [
-        f"📊 *美股收盘及历史对比*",
+        f"📊 *美股收盘简报 (前复权)*",
         f"时间: `{date_str}`",
         "--------------------------------",
         "🔹 *QQQ (纳指100)*",
-        f"收盘: `{qqq['close']:.2f}` (`{qqq['change']:+.2f}%`)",
-        f"距高点回撤: `{qqq['drawdown']:.2f}%`",
-        "\n🗓 *QQQ 历年极值 (2020-2025)*:",
-        qqq['history'],
-        "--------------------------------",
-        "🏛️ *信用利差 (OAS)*"
+        f"收盘: `{qqq['close']:.2f}` (`{qqq['change']:+.2f}%`)"
     ]
+    
+    dd_val = qqq['drawdown']
+    dd_icon = "🟢" if dd_val > -5 else "🟡" if dd_val > -15 else "🔴"
+    
+    msg.append(f"{dd_icon} 距盘中高点回撤: `{qqq['drawdown']:.2f}%`")
+    msg.append(f"历史盘中高点: `{qqq['ath_val']:.2f}`")
+    msg.append(f"高点日期: `{qqq['ath_date']}`\n")
     
     if oas is not None:
         trend_icon = "📈" if oas_change > 0 else "📉"
-        msg.append(f"当前: `{oas:.2f}%` ({trend_icon} `{oas_change:+.2f}%`)")
-        msg.append("\n🗓 *OAS 历年极值 (2020-2025)*:")
+        msg.append(f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` ({trend_icon} `{oas_change:+.2f}%`)")
+        recent_trend = " → ".join([f"{x:.2f}" for x in oas_list[-5:]])
+        msg.append(f"近5日趋势: `{recent_trend}`")
+        msg.append("\n🗓 *OAS 历年极值 (2015-2025)*:")
         msg.append(oas_history)
     else:
-        msg.append("`FRED数据获取延迟`")
+        msg.append("🏛️ *信用利差 (OAS)*: `FRED数据获取延迟`")
         
     msg.append("--------------------------------")
-    msg.append("💡 _注：括号内为发生月-日_")
+    msg.append("💡 _注：QQQ 历史高点采用盘中(High)前复权数值_")
     
     send_msg("\n".join(msg))
 
