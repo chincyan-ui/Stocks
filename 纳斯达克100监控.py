@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import os
 import statistics
+from datetime import datetime
 
 # 1. 标的列表
 TICKERS = [
@@ -24,36 +25,48 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 def 综合分析报告():
     print(f"🚀 开始下载数据并分析 (包含 2025 全年回溯)...")
     
-    # 下载从 2020 年开始的数据以确保 ATH 计算准确
+    # 延长下载范围以确保 ATH 计算准确
     try:
         data = yf.download(TICKERS, start="2020-01-01", auto_adjust=True, group_by='ticker', threads=True)
     except Exception as e:
         return f"❌ 下载失败: {e}"
 
-    # --- 第一部分：计算 2025 年极值 ---
     all_dates = data.index
     target_dates_2025 = all_dates[all_dates.year == 2025]
     
     daily_stats_2025 = []
-    
+    snapshot_1029 = None
+    TARGET_DATE_STR = "2025-10-29"
+
+    # --- 第一部分：计算 2025 年回溯数据 ---
     if not target_dates_2025.empty:
-        print("⏳ 正在回溯 2025 历史极值...")
+        print("⏳ 正在分析 2025 历史数据...")
         for current_date in target_dates_2025:
+            date_str = current_date.strftime('%Y-%m-%d')
             dds = []
             for ticker in TICKERS:
                 try:
+                    # 获取截至当前日期（含）的所有历史
                     hist = data[ticker].loc[:current_date].dropna()
                     if len(hist) < 2: continue
+                    
                     ath = hist['High'].max()
                     price = hist['Close'].iloc[-1]
-                    dds.append((price - ath) / ath * 100)
+                    dd = (price - ath) / ath * 100
+                    dds.append(dd)
                 except: continue
+            
             if dds:
-                daily_stats_2025.append({
-                    "date": current_date.strftime('%Y-%m-%d'),
+                stat = {
+                    "date": date_str,
                     "avg": statistics.mean(dds),
                     "median": statistics.median(dds)
-                })
+                }
+                daily_stats_2025.append(stat)
+                
+                # 记录 10/29 的特定数据
+                if date_str == TARGET_DATE_STR:
+                    snapshot_1029 = stat
 
     # 找出 2025 最惨的一天
     worst_avg_2025 = min(daily_stats_2025, key=lambda x: x['avg']) if daily_stats_2025 else None
@@ -77,15 +90,25 @@ def 综合分析报告():
     # --- 第三部分：构建消息 ---
     消息 = ["📊 **纳指100回撤深度综合报告**", "---"]
     
-    # 1. 2025 极值板块
+    # 1. 新增：2025-10-29 专项对比
+    if snapshot_1029:
+        消息.append(f"🔍 **特定日期回顾 ({TARGET_DATE_STR})**")
+        消息.append(f"▫️ 平均回撤: `{snapshot_1029['avg']:.2f}%`")
+        消息.append(f"▫️ 中位数: `{snapshot_1029['median']:.2f}%`")
+        消息.append("---")
+    else:
+        消息.append(f"⚠️ 无法获取 {TARGET_DATE_STR} 的数据")
+        消息.append("---")
+
+    # 2. 2025 极值板块
     if worst_avg_2025:
         消息.append("📅 **2025 年度历史极值 (Max DD)**")
         消息.append(f"▫️ 平均回撤峰值: `{worst_avg_2025['avg']:.2f}%` ({worst_avg_2025['date']})")
         消息.append(f"▫️ 中位数峰值: `{worst_med_2025['median']:.2f}%` ({worst_med_2025['date']})")
         消息.append("---")
 
-    # 2. 当前概览
-    消息.append("💡 **当前市场状态**")
+    # 3. 当前概览
+    消息.append("💡 **当前实时市场状态**")
     消息.append(f"▫️ 样本数: `{len(current_results)}` 只")
     消息.append(f"▫️ 平均回撤: **{statistics.mean(curr_drawdowns):.2f}%**")
     消息.append(f"▫️ 中位数: **{statistics.median(curr_drawdowns):.2f}%**")
@@ -94,7 +117,7 @@ def 综合分析报告():
     消息.append(f"▫️ 回撤 > 50% 占比: `{ (crash_count/len(current_results))*100 :.2f}%` ({crash_count}只)")
     消息.append("---")
     
-    # 3. 深蹲名单
+    # 4. 深蹲名单
     消息.append("🔥 **实时深蹲 Top 10**")
     for i, item in enumerate(current_results[:10], 1):
         tag = "🆘" if item['drawdown'] <= -50 else "🚨" if item['drawdown'] <= -30 else "📉"
@@ -104,6 +127,7 @@ def 综合分析报告():
 
 def 推送到TG(文本):
     if not TOKEN or not CHAT_ID:
+        print("\n--- 预览模式 (未检测到环境变量) ---")
         print(文本)
         return
     URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -111,7 +135,7 @@ def 推送到TG(文本):
     try:
         r = requests.post(URL, json=payload, timeout=30)
         r.raise_for_status()
-        print("✅ 综合报告已发送")
+        print("✅ 综合报告已发送至 Telegram")
     except Exception as e:
         print(f"❌ 发送失败: {e}")
 
