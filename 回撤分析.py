@@ -2,85 +2,81 @@ import yfinance as yf
 import pandas as pd
 import requests
 import os
-import statistics
 
-# 固定纳指市值前 50 名核心资产 (去除了变动较大的小市值，保留了权重的核心)
-TICKERS = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOG", "GOOGL", "AVGO", "TSLA", "COST",
-    "NFLX", "ASML", "AMD", "AZN", "LIN", "TMUS", "ADBE", "PEP", "CSCO", "ISRG",
-    "TXN", "AMAT", "QCOM", "AMGN", "INTU", "BKNG", "PDD", "HON", "VRTX", "LRCX",
-    "PANW", "REGN", "MU", "ADI", "KLAC", "SNPS", "ADP", "CDNS", "MELI", "MDLZ",
-    "GILD", "PYPL", "MAR", "CTAS", "ORLY", "CRWD", "CSX", "ADSK", "NXPI", "PCAR"
-]
+# 75个标的 (已去重)
+TICKERS = list(set([
+    "AAPL", "MSFT", "GOOG", "AMZN", "META", "NVDA", "TSLA", "AVGO", "ADBE", "COST", 
+    "PEP", "CSCO", "NFLX", "CMCSA", "AMD", "TMUS", "TXN", "AMAT", "QCOM", "INTC", 
+    "ISRG", "AMGN", "HON", "LRCX", "BKNG", "MU", "VRTX", "REGN", "ADP", "KLAC", 
+    "MDLZ", "PANW", "SNPS", "CDNS", "PYPL", "ADI", "ASML", "MAR", "CSX", "ORLY", 
+    "MNST", "CTAS", "INTU", "ROP", "ADSK", "PAYX", "DXCM", "IDXX", "KDP", "GILD", 
+    "LULU", "CHRW", "EA", "PCAR", "EBAY", "ROST", "FAST", "CPRT", "VRSK", "ANSS", 
+    "KHC", "BIIB", "ALGN", "WDC", "MCHP", "NTES", "MELI", "ZS", "FTNT", "NXPI", 
+    "EXPE", "JD", "VRSN", "CHTR"
+]))
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def 历史回撤分析():
-    print(f"🚀 开始分析固定 50 只核心标的 (2020-2025)...")
+    print(f"🚀 开始分析 QQQ 年度顶点日的成分股回撤 (2020-2025)...")
     
-    # 稍微多下载一点数据确保 2020 年初有 ATH 基准
+    all_symbols = TICKERS + ["QQQ"]
+    
     try:
-        data = yf.download(TICKERS, start="2019-10-01", auto_adjust=True, group_by='ticker', threads=True)
+        # 下载数据，从2019年底开始以获取2020年初的ATH基准
+        data = yf.download(all_symbols, start="2019-10-01", end="2026-01-01", auto_adjust=True)
     except Exception as e:
-        return f"❌ 下载失败: {e}"
+        return f"❌ 数据下载失败: {e}"
 
     if data.empty:
-        return "❌ 未下载到任何数据，请检查网络或 Tickers 列表。"
+        return "❌ 未下载到任何数据，请检查 yfinance 状态。"
 
-    report_lines = ["📊 **纳指 50 强历史回撤深度统计**", "---"]
+    close_data = data['Close']
+    high_data = data['High']
     
-    # 遍历 2020 到 2025 年
-    for year in range(2020, 2026):
-        year_dates = data.index[data.index.year == year]
-        if year_dates.empty:
-            continue
-        
-        daily_stats = []
-        for current_date in year_dates:
-            drawdowns = []
-            for ticker in TICKERS:
-                try:
-                    # 获取该股截止到当前日期的所有收盘价数据
-                    subset = data[ticker].loc[:current_date].dropna()
-                    if len(subset) < 2:
-                        continue
-                        
-                    # 以该日期前的最高价作为 ATH
-                    ath = subset['High'].max()
-                    curr_price = subset['Close'].iloc[-1]
-                    
-                    dd = (curr_price - ath) / ath * 100
-                    drawdowns.append(dd)
-                except:
-                    continue
-            
-            if drawdowns:
-                daily_stats.append({
-                    "date": current_date.strftime('%Y-%m-%d'),
-                    "avg": statistics.mean(drawdowns),
-                    "med": statistics.median(drawdowns)
-                })
-        
-        if daily_stats:
-            # 找到回撤数值最小（最深）和最大（最浅）的日期
-            max_avg_day = min(daily_stats, key=lambda x: x['avg']) # 例如 -25%
-            min_avg_day = max(daily_stats, key=lambda x: x['avg']) # 例如 -2%
-            max_med_day = min(daily_stats, key=lambda x: x['med'])
-            min_med_day = max(daily_stats, key=lambda x: x['med'])
+    # 预计算所有标的历史至今的最高价 (ATH) 矩阵
+    ath_matrix = high_data[TICKERS].expanding().max()
 
-            report_lines.append(f"📅 **{year} 年度**")
-            report_lines.append(f"▫️ 平均最深: `{max_avg_day['avg']:.2f}%` ({max_avg_day['date']})")
-            report_lines.append(f"▫️ 平均最浅: `{min_avg_day['avg']:.2f}%` ({min_avg_day['date']})")
-            report_lines.append(f"▫️ 中位最深: `{max_med_day['med']:.2f}%` ({max_med_day['date']})")
-            report_lines.append(f"▫️ 中位最浅: `{min_med_day['med']:.2f}%` ({min_med_day['date']})")
-            report_lines.append("---")
+    report_lines = ["🎯 **QQQ 年度顶点日成分股回撤统计**", "---"]
+
+    for year in range(2020, 2026):
+        # 锁定当年的数据
+        year_mask = (data.index.year == year)
+        if not year_mask.any():
+            continue
+            
+        qqq_year = data.loc[year_mask, 'QQQ']
+        
+        # 1. 找到 QQQ 这一年的最高值及日期
+        qqq_max_val = qqq_year['High'].max()
+        peak_date = qqq_year['High'].idxmax()
+        peak_date_str = peak_date.strftime('%Y-%m-%d')
+
+        # 2. 获取顶点日当天的截面数据
+        # 使用 .loc[peak_date] 提取那一天所有股票的收盘价和当时的历史最高价
+        prices_at_peak = close_data.loc[peak_date, TICKERS]
+        aths_at_peak = ath_matrix.loc[peak_date, TICKERS]
+
+        # 3. 计算回撤 (Current Close - History High) / History High
+        drawdowns = (prices_at_peak - aths_at_peak) / aths_at_peak * 100
+        drawdowns = drawdowns.dropna() # 剔除尚未上市或数据缺失的股票
+        
+        avg_dd = drawdowns.mean()
+        med_dd = drawdowns.median()
+
+        # 组装报告
+        report_lines.append(f"📅 **{year} 年度**")
+        report_lines.append(f"🔝 QQQ 峰值: `{qqq_max_val:.2f}` ({peak_date_str})")
+        report_lines.append(f"📊 75强平均回撤: `{avg_dd:.2f}%`")
+        report_lines.append(f"⚖️ 75强中位回撤: `{med_dd:.2f}%`")
+        report_lines.append("---")
 
     return "\n".join(report_lines)
 
 def 推送到TG(文本):
     if not TOKEN or not CHAT_ID:
-        print("⚠️ 环境变量缺失，本地直接打印结果：\n")
+        print("\n⚠️ 缺失 Telegram 配置，结果如下：\n")
         print(文本)
         return
         
@@ -94,10 +90,10 @@ def 推送到TG(文本):
     try:
         r = requests.post(URL, json=payload, timeout=30)
         r.raise_for_status()
-        print("✅ 报告已成功推送到 Telegram")
+        print("✅ 报告已推送到 Telegram")
     except Exception as e:
         print(f"❌ 发送失败: {e}")
 
 if __name__ == "__main__":
-    report_content = 历史回撤分析()
-    推送到TG(report_content)
+    content = 历史回撤分析()
+    推送到TG(content)
