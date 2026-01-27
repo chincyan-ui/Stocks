@@ -1,17 +1,16 @@
-name: Nasdaq 100 Historical Drawdown Analysis
+name: Nasdaq 50 Drawdown Analysis
 
 on:
   schedule:
-    # 每天北京时间上午 08:30 运行 (UTC 00:30)
-    - cron: '30 0 * * 1-5'
-  workflow_dispatch: # 允许手动点击运行
+    # 每天北京时间上午 9:00 运行 (对应 UTC 01:00)
+    - cron: '0 1 * * 1-5'
+  workflow_dispatch: # 支持手动运行
 
 jobs:
-  build:
+  run_analysis:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -19,14 +18,12 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install yfinance pandas requests
 
-      - name: Run Analysis Script
+      - name: Execute Script
         env:
-          # 在 GitHub Repo -> Settings -> Secrets and variables -> Actions 中设置以下变量
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python 回撤分析.py  # 确保这里替换为你 Python 脚本的实际文件名
+        run: python 回撤分析.py # 请确保这里的文件名和你的脚本名一致
