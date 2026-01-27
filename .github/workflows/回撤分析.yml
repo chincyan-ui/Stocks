@@ -1,10 +1,10 @@
-name: Nasdaq 50 Drawdown Analysis
+name: Nasdaq 75 Drawdown Analysis
 
 on:
   schedule:
     # 每天北京时间上午 9:00 运行 (对应 UTC 01:00)
     - cron: '0 1 * * 1-5'
-  workflow_dispatch: # 支持手动运行
+  workflow_dispatch: # 支持手动触发
 
 jobs:
   run_analysis:
@@ -26,4 +26,4 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python 回撤分析.py # 请确保这里的文件名和你的脚本名一致
+        run: python 回撤分析.py
