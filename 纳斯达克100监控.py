@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 import os
+import statistics  # 新增：用于计算平均值和中位数
 
 # 1. 标的列表
 TICKERS = [
@@ -24,7 +25,7 @@ def 获取回撤报告():
     print(f"🚀 正在下载 {len(TICKERS)} 只股票的历史数据...")
     
     try:
-        # 增加 period="max" 以确保计算的是历史最高位 (ATH)
+        # 使用 period="max" 下载数据
         data = yf.download(TICKERS, period="max", auto_adjust=True, group_by='ticker', threads=True)
     except Exception as e:
         return f"❌ 下载失败: {e}"
@@ -33,14 +34,17 @@ def 获取回撤报告():
     
     for ticker in TICKERS:
         try:
-            if ticker not in data.columns.levels[0]:
-                continue
+            # 兼容多列索引和单列索引的情况
+            if isinstance(data.columns, pd.MultiIndex):
+                if ticker not in data.columns.levels[0]: continue
+                df = data[ticker].dropna()
+            else:
+                df = data.dropna() # 只有一个股票的情况
                 
-            df = data[ticker].dropna()
             if df.empty or len(df) < 5: 
                 continue
             
-            # 计算回撤
+            # 计算回撤：(现价 - 历史最高价) / 历史最高价
             ath = df['High'].max()
             current_price = df['Close'].iloc[-1]
             drawdown = (current_price - ath) / ath * 100
@@ -57,9 +61,14 @@ def 获取回撤报告():
     if not 结果列表:
         return "❌ 抱歉，未能获取到有效的股票分析数据。"
 
-    # --- 新增功能：统计回撤超过 50% 的比例 ---
+    # --- 新增功能：统计平均值和中位数 ---
+    all_drawdowns = [x['drawdown'] for x in 结果列表]
+    avg_drawdown = statistics.mean(all_drawdowns)
+    median_drawdown = statistics.median(all_drawdowns)
+
+    # 统计回撤超过 50% 的比例
     total_count = len(结果列表)
-    crash_count = len([x for x in 结果列表 if x['drawdown'] <= -50])
+    crash_count = len([d for d in all_drawdowns if d <= -50])
     crash_ratio = (crash_count / total_count) * 100
 
     # 排序：回撤最大的排在前面
@@ -70,6 +79,8 @@ def 获取回撤报告():
         "📊 **纳斯达克100成分股回撤统计**",
         "---",
         f"📈 统计样本：`{total_count}` 只股票",
+        f"📉 平均回撤：**{avg_drawdown:.2f}%**",
+        f"⚖️ 回撤中位数：**{median_drawdown:.2f}%**",
         f"⚠️ 回撤 > 50% 占比：**{crash_ratio:.2f}%** ({crash_count}只)",
         "---",
         f"🔥 **深蹲名单 (Top 15)**"
@@ -84,8 +95,8 @@ def 获取回撤报告():
             tag = "📉"
             
         消息.append(f"{i}. {tag} **{item['symbol']}**")
-        消息.append(f"   ▫️ 距最高位: `{item['drawdown']:.2f}%`")
-        消息.append(f"   ▫️ 价格: `{item['current']:.2f}` / ATH: `{item['ath']:.2f}`")
+        消息.append(f"    ▫️ 距最高位: `{item['drawdown']:.2f}%`")
+        消息.append(f"    ▫️ 价格: `{item['current']:.2f}` / ATH: `{item['ath']:.2f}`")
         
     return "\n".join(消息)
 
