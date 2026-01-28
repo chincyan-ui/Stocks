@@ -12,11 +12,12 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_oas_history_stats(df: pd.DataFrame) -> str:
-    """计算 2015-2025 OAS 的历年最高/最低点及日期"""
+    """计算 2010-2026 OAS 的历年最高/最低点及日期"""
     stats_msg = []
     df.index = pd.to_datetime(df.index)
     
-    for year in range(2015, 2026):
+    # 修改：循环范围调整为 2010 到 2026
+    for year in range(2010, 2027): 
         year_data = df[df.index.year == year]
         if year_data.empty:
             continue
@@ -33,9 +34,10 @@ def get_oas_history_stats(df: pd.DataFrame) -> str:
     return "\n".join(stats_msg)
 
 def get_oas_data():
-    """获取美银美林高收益债利差 (2015-2025)"""
+    """获取美银美林高收益债利差 (2010-2026)"""
     try:
-        start = datetime.datetime(2015, 1, 1)
+        # 修改：起始日期调整为 2010-01-01
+        start = datetime.datetime(2010, 1, 1)
         end = datetime.datetime.now()
         df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
         df = df.dropna()
@@ -58,22 +60,17 @@ def get_qqq_stats() -> Optional[dict]:
     """获取 QQQ 行情及盘中前复权 ATH"""
     try:
         ticker = yf.Ticker("QQQ")
-        # 获取上市以来所有数据以计算盘中 ATH
-        # auto_adjust=True 确保 High 和 Close 都是前复权数值
         df_all = ticker.history(period="max", auto_adjust=True)
         if df_all.empty:
             return None
             
-        # 1. 计算全历史盘中最高价及其日期
         ath_val = df_all['High'].max()
         ath_date = df_all[df_all['High'] == ath_val].index[-1].strftime('%Y-%m-%d')
         
-        # 2. 获取最新价格及涨跌 (基于最近两日收盘)
         curr_price = df_all['Close'].iloc[-1]
         prev_price = df_all['Close'].iloc[-2]
         change_pct = (curr_price - prev_price) / prev_price * 100
         
-        # 3. 计算当前价格距离盘中 ATH 的回撤
         drawdown = (curr_price / ath_val - 1) * 100
         
         return {
@@ -138,7 +135,8 @@ def main():
         msg.append(f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` ({trend_icon} `{oas_change:+.2f}%`)")
         recent_trend = " → ".join([f"{x:.2f}" for x in oas_list[-5:]])
         msg.append(f"近5日趋势: `{recent_trend}`")
-        msg.append("\n🗓 *OAS 历年极值 (2015-2025)*:")
+        # 修改：文案说明同步更新
+        msg.append("\n🗓 *OAS 历年极值 (2010-2026)*:")
         msg.append(oas_history)
     else:
         msg.append("🏛️ *信用利差 (OAS)*: `FRED数据获取延迟`")
