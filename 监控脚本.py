@@ -6,8 +6,8 @@ import os
 TICKERS = [
     "IONQ", "MSTR", "CRWV", "CRCL", "HIMS", "NVO", "OKLO", "HOOD",
     "IREN", "BMNR", "ASTS", "RKLB", "APLD", "QBTS", "NBIS", "CRML",
-    "ONDS", "CLSK", "NVTS", "ALAB", "CIFR", "RDDT", "SOFI", "RIOT",
-    "LLY", "MARA", "TEM", "MRVL", "BE"
+    "ONDS", "NVTS", "ALAB", "CIFR", "RDDT", "SOFI", "RIOT",
+    "LLY", "TEM", "MRVL", "BE"
 ]
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
