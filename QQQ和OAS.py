@@ -11,18 +11,16 @@ from typing import Optional, Tuple
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-def get_oas_history_stats(df: pd.DataFrame) -> str:
-    """计算 2010-2026 OAS 的历年最高/最低点及日期"""
+def get_history_stats(df: pd.DataFrame, col: str) -> str:
+    """通用函数：计算 2010-2026 的历年最高/最低点及日期"""
     stats_msg = []
     df.index = pd.to_datetime(df.index)
     
-    # 修改：循环范围调整为 2010 到 2026
     for year in range(2010, 2027): 
         year_data = df[df.index.year == year]
         if year_data.empty:
             continue
             
-        col = "BAMLH0A0HYM2"
         max_val = year_data[col].max()
         min_val = year_data[col].min()
         
@@ -33,28 +31,35 @@ def get_oas_history_stats(df: pd.DataFrame) -> str:
     
     return "\n".join(stats_msg)
 
-def get_oas_data():
-    """获取美银美林高收益债利差 (2010-2026)"""
+def get_macro_data():
+    """获取 OAS (BAMLH0A0HYM2) 和 10年美债 (DGS10) 数据"""
     try:
-        # 修改：起始日期调整为 2010-01-01
         start = datetime.datetime(2010, 1, 1)
         end = datetime.datetime.now()
-        df = web.DataReader("BAMLH0A0HYM2", "fred", start, end)
+        # 同时抓取两个指标
+        df = web.DataReader(["BAMLH0A0HYM2", "DGS10"], "fred", start, end)
         df = df.dropna()
         
         if df.empty:
-            return None, None, [], ""
+            return None
             
-        current_oas = float(df.iloc[-1, 0])
-        prev_oas = float(df.iloc[-2, 0])
-        change = current_oas - prev_oas
-        oas_list = df.iloc[-7:, 0].tolist()
+        # 提取 OAS 数据
+        oas_curr = float(df["BAMLH0A0HYM2"].iloc[-1])
+        oas_change = oas_curr - float(df["BAMLH0A0HYM2"].iloc[-2])
+        oas_history = get_history_stats(df, "BAMLH0A0HYM2")
         
-        history_report = get_oas_history_stats(df)
-        return current_oas, change, oas_list, history_report
+        # 提取 10Y 美债数据
+        tnx_curr = float(df["DGS10"].iloc[-1])
+        tnx_change = tnx_curr - float(df["DGS10"].iloc[-2])
+        tnx_history = get_history_stats(df, "DGS10")
+        
+        return {
+            "oas": (oas_curr, oas_change, oas_history),
+            "tnx": (tnx_curr, tnx_change, tnx_history)
+        }
     except Exception as e:
-        print(f"⚠️ OAS 获取失败: {e}")
-        return None, None, [], ""
+        print(f"⚠️ 宏观数据获取失败: {e}")
+        return None
 
 def get_qqq_stats() -> Optional[dict]:
     """获取 QQQ 行情及盘中前复权 ATH"""
@@ -109,7 +114,7 @@ def main():
     now = datetime.datetime.now(tz)
     date_str = now.strftime('%Y-%m-%d %H:%M')
     
-    oas, oas_change, oas_list, oas_history = get_oas_data()
+    macro = get_macro_data()
     qqq = get_qqq_stats()
     
     if not qqq:
@@ -125,21 +130,27 @@ def main():
     
     dd_val = qqq['drawdown']
     dd_icon = "🟢" if dd_val > -5 else "🟡" if dd_val > -15 else "🔴"
-    
     msg.append(f"{dd_icon} 距盘中高点回撤: `{qqq['drawdown']:.2f}%`")
     msg.append(f"历史盘中高点: `{qqq['ath_val']:.2f}`")
     msg.append(f"高点日期: `{qqq['ath_date']}`\n")
     
-    if oas is not None:
-        trend_icon = "📈" if oas_change > 0 else "📉"
-        msg.append(f"🏛️ *信用利差 (OAS)*: `{oas:.2f}%` ({trend_icon} `{oas_change:+.2f}%`)")
-        recent_trend = " → ".join([f"{x:.2f}" for x in oas_list[-5:]])
-        msg.append(f"近5日趋势: `{recent_trend}`")
-        # 修改：文案说明同步更新
+    if macro:
+        # 1. 展示 10Y 美债
+        tnx_val, tnx_chg, tnx_hist = macro['tnx']
+        t_icon = "📈" if tnx_chg > 0 else "📉"
+        msg.append(f"🇺🇸 *10年美债收益率*: `{tnx_val:.2f}%` ({t_icon} `{tnx_chg:+.2f}%`)")
+        
+        # 2. 展示 OAS
+        oas_val, oas_chg, oas_hist = macro['oas']
+        o_icon = "📈" if oas_chg > 0 else "📉"
+        msg.append(f"🏛️ *信用利差 (OAS)*: `{oas_val:.2f}%` ({o_icon} `{oas_chg:+.2f}%`)\n")
+        
+        msg.append("🗓 *10Y美债 历年极值 (2010-2026)*:")
+        msg.append(tnx_hist)
         msg.append("\n🗓 *OAS 历年极值 (2010-2026)*:")
-        msg.append(oas_history)
+        msg.append(oas_hist)
     else:
-        msg.append("🏛️ *信用利差 (OAS)*: `FRED数据获取延迟`")
+        msg.append("🏛️ *宏观数据*: `FRED数据获取延迟`")
         
     msg.append("--------------------------------")
     msg.append("💡 _注：QQQ 历史高点采用盘中(High)前复权数值_")
