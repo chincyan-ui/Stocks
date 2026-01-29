@@ -5,14 +5,14 @@ import requests
 import os
 import pandas as pd
 import pytz
-from typing import Optional, Tuple
+from typing import Optional
 
 # ================= 配置环境 =================
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def get_history_stats(df: pd.DataFrame, col: str) -> str:
-    """通用函数：计算 2010-2026 的历年最高/最低点及日期"""
+    """计算 2010-2026 的历年最高/最低点及日期"""
     stats_msg = []
     df.index = pd.to_datetime(df.index)
     
@@ -32,30 +32,31 @@ def get_history_stats(df: pd.DataFrame, col: str) -> str:
     return "\n".join(stats_msg)
 
 def get_macro_data():
-    """获取 OAS (BAMLH0A0HYM2) 和 10年美债 (DGS10) 数据"""
+    """获取 OAS 数据及其最近 7 天趋势"""
     try:
         start = datetime.datetime(2010, 1, 1)
         end = datetime.datetime.now()
-        # 同时抓取两个指标
-        df = web.DataReader(["BAMLH0A0HYM2", "DGS10"], "fred", start, end)
+        df = web.DataReader(["BAMLH0A0HYM2"], "fred", start, end)
         df = df.dropna()
         
         if df.empty:
             return None
             
-        # 提取 OAS 数据
+        # 提取当前数据和变动
         oas_curr = float(df["BAMLH0A0HYM2"].iloc[-1])
         oas_change = oas_curr - float(df["BAMLH0A0HYM2"].iloc[-2])
-        oas_history = get_history_stats(df, "BAMLH0A0HYM2")
         
-        # 提取 10Y 美债数据
-        tnx_curr = float(df["DGS10"].iloc[-1])
-        tnx_change = tnx_curr - float(df["DGS10"].iloc[-2])
-        tnx_history = get_history_stats(df, "DGS10")
+        # 获取最近 7 天的数值 (取最后 7 行)
+        recent_7 = df["BAMLH0A0HYM2"].tail(7)
+        trend_msg = []
+        for date, val in recent_7.items():
+            trend_msg.append(f"{date.strftime('%m-%d')}: `{val:.2f}%`")
+        
+        oas_history = get_history_stats(df, "BAMLH0A0HYM2")
         
         return {
             "oas": (oas_curr, oas_change, oas_history),
-            "tnx": (tnx_curr, tnx_change, tnx_history)
+            "trend": "\n".join(trend_msg)
         }
     except Exception as e:
         print(f"⚠️ 宏观数据获取失败: {e}")
@@ -135,25 +136,23 @@ def main():
     msg.append(f"高点日期: `{qqq['ath_date']}`\n")
     
     if macro:
-        # 1. 展示 10Y 美债
-        tnx_val, tnx_chg, tnx_hist = macro['tnx']
-        t_icon = "📈" if tnx_chg > 0 else "📉"
-        msg.append(f"🇺🇸 *10年美债收益率*: `{tnx_val:.2f}%` ({t_icon} `{tnx_chg:+.2f}%`)")
-        
-        # 2. 展示 OAS
+        # 展示当前 OAS
         oas_val, oas_chg, oas_hist = macro['oas']
         o_icon = "📈" if oas_chg > 0 else "📉"
-        msg.append(f"🏛️ *信用利差 (OAS)*: `{oas_val:.2f}%` ({o_icon} `{oas_chg:+.2f}%`)\n")
+        msg.append(f"🏛️ *信用利差 (OAS)*: `{oas_val:.2f}%` ({o_icon} `{oas_chg:+.2f}%`)")
         
-        msg.append("🗓 *10Y美债 历年极值 (2010-2026)*:")
-        msg.append(tnx_hist)
+        # 展示最近 7 天趋势
+        msg.append("\n📈 *最近 7 天 OAS 趋势*:")
+        msg.append(macro['trend'])
+        
+        # 展示历年极值
         msg.append("\n🗓 *OAS 历年极值 (2010-2026)*:")
         msg.append(oas_hist)
     else:
         msg.append("🏛️ *宏观数据*: `FRED数据获取延迟`")
         
     msg.append("--------------------------------")
-    msg.append("💡 _注：QQQ 历史高点采用盘中(High)前复权数值_")
+    msg.append("💡 _注：OAS 数值越低代表市场风险偏好越高_")
     
     send_msg("\n".join(msg))
 
