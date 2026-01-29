@@ -5,13 +5,13 @@ import os
 import statistics
 from datetime import datetime
 
-# 1. 核心标的列表 (37 只)
+# 1. 核心标的列表 (增加了 AMD, PLTR, APP，共 40 只)
 TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "AVGO", "COST", 
     "PEP", "ADBE", "CSCO", "CMCSA", "NFLX", "INTC", "QCOM", "AMGN", 
     "TXN", "HON", "INTU", "AMAT", "SBUX", "ISRG", "GILD", "MDLZ", 
     "BKNG", "ADI", "VRTX", "REGN", "LRCX", "ADP", "MU", "PYPL", 
-    "SNPS", "CDNS", "CTSH", "ASML", "TSLA"
+    "SNPS", "CDNS", "CTSH", "ASML", "TSLA", "AMD", "PLTR", "APP"
 ]
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -41,10 +41,10 @@ def get_stats_on_date(data, target_date_str):
     return None
 
 def 综合分析报告():
-    print(f"🚀 开始全量深度扫描 (按回撤排序)...")
+    print(f"🚀 开始全量深度扫描 (40只标的，按回撤排序)...")
     
     try:
-        # 下载 2020 年至今的前复权数据
+        # 下载自2020年起的前复权数据
         data = yf.download(TICKERS, start="2020-01-01", auto_adjust=True, group_by='ticker', threads=True)
     except Exception as e:
         return f"❌ 数据下载失败: {e}"
@@ -82,20 +82,20 @@ def 综合分析报告():
     full_results.sort(key=lambda x: x['drawdown'])
     all_dds = [x['drawdown'] for x in full_results]
 
-    # --- D. 构建长消息文本 ---
-    消息 = ["📊 **全标的深度回撤清单 (按幅度排序)**", "---"]
+    # --- D. 构建报告文本 ---
+    消息 = ["📊 **核心标的全量回撤清单 (40只)**", "---"]
     
-    # 1. 历史基准对比
+    # 1. 历史对比
     消息.append("📅 **2025 历史基准对比**")
     for stat in [stats_0407, stats_1029]:
         if stat:
             消息.append(f"`{stat['date']}`: 平均 `{stat['avg']:.1f}%` | 中位 `{stat['med']:.1f}%`")
     消息.append("---")
 
-    # 2. 全量列表详情
-    消息.append("🔍 **各股回撤背景详述**")
+    # 2. 详尽列表
+    消息.append("🔍 **各股回撤背景详述 (按幅度降序)**")
     for i, item in enumerate(full_results, 1):
-        # 图标逻辑：深蹲程度
+        # 警示图标
         icon = "🆘" if item['drawdown'] <= -50 else "🚨" if item['drawdown'] <= -30 else "📉" if item['drawdown'] <= -15 else "▫️"
         
         detail = [
@@ -106,9 +106,9 @@ def 综合分析报告():
         ]
         消息.extend(detail)
 
-    # 3. 统计总结
+    # 3. 统计汇总
     消息.append("---")
-    消息.append(f"💡 **整体统计 (37只标的)**")
+    消息.append(f"💡 **整体统计 (n=40)**")
     消息.append(f"▫️ 平均回撤: **{statistics.mean(all_dds):.2f}%**")
     消息.append(f"▫️ 中位回撤: **{statistics.median(all_dds):.2f}%**")
 
@@ -116,17 +116,15 @@ def 综合分析报告():
 
 def 推送到TG(文本):
     if not TOKEN or not CHAT_ID:
-        print("\n--- 预览模式 (环境变量未配置) ---")
-        print(文本)
+        print("\n--- 预览模式 ---\n", 文本)
         return
 
     URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     
-    # 自动切分：由于 37 只股票详情非常长，必须按 4000 字符切分发送
+    # 智能分段推送
     MAX_CHAR = 4000
     if len(文本) > MAX_CHAR:
         parts = []
-        # 按行切分，防止切断 Markdown 语法
         lines = 文本.split('\n')
         current_part = ""
         for line in lines:
@@ -141,17 +139,13 @@ def 推送到TG(文本):
 
     for i, part in enumerate(parts):
         header = f"*(Part {i+1}/{len(parts)})*\n" if len(parts) > 1 else ""
-        payload = {
-            "chat_id": CHAT_ID, 
-            "text": header + part, 
-            "parse_mode": "Markdown"
-        }
+        payload = {"chat_id": CHAT_ID, "text": header + part, "parse_mode": "Markdown"}
         try:
             r = requests.post(URL, json=payload, timeout=30)
-            if r.status_code != 200:
-                print(f"❌ 第 {i+1} 部分推送失败: {r.text}")
+            if r.status_code == 200:
+                print(f"✅ 第 {i+1} 部分发送成功")
         except Exception as e:
-            print(f"❌ 网络异常: {e}")
+            print(f"❌ 请求异常: {e}")
 
 if __name__ == "__main__":
     report_content = 综合分析报告()
