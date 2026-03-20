@@ -1,15 +1,15 @@
-name: Daily Stock Drawdown Monitor (Python)
+name: Daily Scrape Stock Monitor
 
 on:
   schedule:
-    - cron: '0 13 * * *' # 每天北京时间 21:00 运行
+    - cron: '0 13 * * *' 
   workflow_dispatch: 
 
 jobs:
-  build:
+  run_monitor:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -18,10 +18,9 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: |
-          pip install yfinance requests
+        run: pip install requests beautifulsoup4
 
-      - name: Run script
+      - name: Run Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
