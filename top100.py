@@ -1,70 +1,86 @@
-import yfinance as yf
 import requests
+from bs4 import BeautifulSoup
 import os
+import time
 
-# 从 GitHub Secrets 读取配置
+# 配置
 TG_TOKEN = os.getenv('TG_TOKEN')
 TG_CHAT_ID = os.getenv('TG_CHAT_ID')
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
-# 待监控的股票列表（你可以根据需要添加更多，如：AAPL, TSLA, NVDA 等）
-SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B", "TSM", "UNH", "V", "JPM", "NFLX", "AMD"]
+def get_top_100_symbols():
+    print("正在从 CompaniesMarketCap 抓取前100名列表...")
+    url = "https://companiesmarketcap.com/"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        symbols = []
+        # 定位表格中的股票代码
+        code_elements = soup.select('div.company-code')
+        for code in code_elements:
+            symbols.append(code.get_text().strip())
+            if len(symbols) >= 100:
+                break
+        return symbols
+    except Exception as e:
+        print(f"抓取列表失败: {e}")
+        return []
 
-def get_stock_data():
-    results = []
-    print("正在获取行情数据...")
-    
-    for symbol in SYMBOLS:
-        try:
-            ticker = yf.Ticker(symbol)
-            # 获取 5 年历史数据
-            hist = ticker.history(period="5y")
-            if hist.empty:
-                continue
-                
-            current_price = hist['Close'].iloc[-1]
-            # 计算 5 年内的历史最高价 (ATH)
-            ath = hist['High'].max()
-            # 计算回撤幅度
-            drawdown = ((current_price - ath) / ath) * 100
-            
-            results.append({
-                "symbol": symbol,
-                "price": round(current_price, 2),
-                "ath": round(ath, 2),
-                "drawdown": round(drawdown, 2)
-            })
-        except Exception as e:
-            print(f"获取 {symbol} 出错: {e}")
-            
-    # 按回撤幅度排序（跌得最深的排在前面）
-    results.sort(key=lambda x: x['drawdown'])
-    return results[:10]
+def get_drawdown_data(symbol):
+    try:
+        # 获取 5 年数据计算 ATH
+        api_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5y"
+        res = requests.get(api_url, headers=HEADERS, timeout=10)
+        data = res.json()
+        
+        result = data['chart']['result'][0]
+        current_price = result['meta']['regularMarketPrice']
+        highs = [h for h in result['indicators']['quote'][0]['high'] if h is not None]
+        
+        ath = max(max(highs), current_price)
+        drawdown = ((current_price - ath) / ath) * 100
+        
+        return {
+            "symbol": symbol,
+            "price": round(current_price, 2),
+            "ath": round(ath, 2),
+            "drawdown": round(drawdown, 2)
+        }
+    except:
+        return None
 
-def send_tg_message(data):
-    if not TG_TOKEN or not TG_CHAT_ID:
-        print("未配置 Telegram Token 或 Chat ID")
+def main():
+    symbols = get_top_100_symbols()
+    if not symbols:
         return
 
-    message = "📊 *每日股票回撤榜 (Top 10)*\n\n"
-    for i, s in enumerate(data, 1):
-        message += f"{i}. *{s['symbol']}*\n"
-        message += f"   现价: ${s['price']} | ATH: ${s['ath']}\n"
-        message += f"   *回撤: {s['drawdown']}%*\n\n"
+    results = []
+    print(f"开始获取 {len(symbols)} 个股票的详细行情...")
+    for s in symbols:
+        data = get_drawdown_data(s)
+        if data:
+            results.append(data)
+        time.sleep(0.2) # 防止请求过快被封
 
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TG_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        print("消息发送成功！")
+    # 按回撤排序 (负数越小表示跌得越多)
+    results.sort(key=lambda x: x['drawdown'])
+    top_10 = results[:10]
+
+    # 构建 TG 消息
+    msg = "📉 *市值 Top100 股票回撤榜 (最大10个)*\n\n"
+    for i, s in enumerate(top_10, 1):
+        msg += f"{i}. *{s['symbol']}*\n"
+        msg += f"   现价: `${s['price']}` | ATH: `${s['ath']}`\n"
+        msg += f"   *回撤幅度: {s['drawdown']}%*\n\n"
+
+    # 发送
+    if TG_TOKEN and TG_CHAT_ID:
+        tg_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        requests.post(tg_url, json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        print("推送成功")
     else:
-        print(f"发送失败: {response.text}")
+        print(msg)
 
 if __name__ == "__main__":
-    top_stocks = get_stock_data()
-    if top_stocks:
-        send_tg_message(top_stocks)
+    main()
