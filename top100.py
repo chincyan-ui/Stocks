@@ -65,7 +65,7 @@ def main():
 
     # 按回撤排序 (负数越小表示跌得越多)
     results.sort(key=lambda x: x['drawdown'])
-    top_10 = results[:10]
+    top_10 = results[:30]
 
     # 构建 TG 消息
     msg = "📉 *市值 Top100 股票回撤榜 (最大10个)*\n\n"
