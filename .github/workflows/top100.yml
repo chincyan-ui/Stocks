@@ -1,9 +1,9 @@
-name: Daily Stock Drawdown Monitor
+name: Daily Stock Drawdown Monitor (Python)
 
 on:
   schedule:
-    - cron: '0 13 * * *' # 每天 UTC 13:00 运行 (北京时间 21:00)
-  workflow_dispatch: # 支持手动触发
+    - cron: '0 13 * * *' # 每天北京时间 21:00 运行
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -12,16 +12,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          node-version: 18
+          python-version: '3.9'
 
       - name: Install dependencies
-        run: npm install axios
+        run: |
+          pip install yfinance requests
 
       - name: Run script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: node top100.js
+        run: python top100.py
