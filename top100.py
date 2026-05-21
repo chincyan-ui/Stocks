@@ -1,7 +1,7 @@
+import requests
+from bs4 import BeautifulSoup
 import os
 import time
-import requests
-import pandas as pd
 
 # 配置
 TG_TOKEN = os.getenv('TG_TOKEN')
@@ -12,27 +12,34 @@ def get_nasdaq_100_symbols():
     print("正在从维基百科动态加载最新的纳斯达克100成分股...")
     url = "https://en.wikipedia.org/wiki/Nasdaq-100"
     try:
-        # 使用 pandas 直接解析网页中的所有 Table
-        tables = pd.read_html(url)
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(resp.text, 'html.parser')
         
-        # 寻找包含 Ticker 或 Symbol 列表的那个成分股表格
-        df = None
-        for t in tables:
-            # 将列名统一转为小写方便匹配
-            columns = [str(col).lower() for col in t.columns]
-            if any('ticker' in col or 'symbol' in col for col in columns):
-                df = t
-                break
-                
-        if df is None:
-            print("未能定位到成分股表格，请检查维基百科结构。")
+        table = soup.find('table', {'id': 'constituents'})
+        if not table:
+            print("未找到 id 为 constituents 的表格")
             return []
-            
-        # 找到包含股票代码的那一列
-        ticker_col = [col for col in df.columns if 'ticker' in str(col).lower() or 'symbol' in str(col).lower()][0]
+
+        # 1. 动态定位 Ticker 所在的列索引
+        headers = [th.text.strip().lower() for th in table.find_all('th')]
+        ticker_idx = -1
+        for idx, h in enumerate(headers):
+            if 'ticker' in h or 'symbol' in h:
+                ticker_idx = idx
+                break
         
-        # 提取并清洗股票代码（转换雅虎财经兼容的格式，如将 BF.B 转换为 BF-B）
-        symbols = df[ticker_col].astype(str).str.strip().str.replace('.', '-', regex=False).tolist()
+        if ticker_idx == -1:
+            ticker_idx = 1 # 如果找不到，默认使用历史经验常规的第二列
+            
+        # 2. 遍历行提取数据
+        symbols = []
+        for row in table.find_all('tr')[1:]: # 跳过表头
+            cols = row.find_all('td')
+            if len(cols) > ticker_idx:
+                symbol = cols[ticker_idx].text.strip().replace('.', '-')
+                if symbol:
+                    symbols.append(symbol)
+                    
         print(f"成功加载最新成分股，共计 {len(symbols)} 只股票代码。")
         return symbols
     except Exception as e:
@@ -41,7 +48,6 @@ def get_nasdaq_100_symbols():
 
 def get_stock_details(symbol):
     try:
-        # 请求5年历史K线，整合单日行情与历史ATH数据
         api_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5y"
         res = requests.get(api_url, headers=HEADERS, timeout=10)
         res.raise_for_status()
@@ -55,17 +61,12 @@ def get_stock_details(symbol):
         prev_close = meta.get('previousClose')
         market_cap = meta.get('marketCap', 0)
         
-        # 核心指标安全校验
         if not current_price or not volume:
             return None
             
-        # 1. 计算交易金额 (现价 * 当日成交量)
         turnover = current_price * volume
-        
-        # 2. 计算当日涨跌幅
         daily_change = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0.0
         
-        # 3. 计算 5 年自最高位（ATH）的回撤比例
         highs = [h for h in result['indicators']['quote'][0]['high'] if h is not None]
         ath = max(max(highs), current_price) if highs else current_price
         drawdown = ((current_price - ath) / ath) * 100
@@ -79,11 +80,9 @@ def get_stock_details(symbol):
             "daily_change": round(daily_change, 2)
         }
     except Exception as e:
-        # 如个别退市或刚更换代码的标的报错，静默跳过不干扰整体运行
         return None
 
 def format_amount(num):
-    """优雅地格式化巨额美金单位"""
     if num is None or num == 0:
         return "N/A"
     if num >= 1e12:
@@ -100,24 +99,20 @@ def main():
         return
 
     results = []
-    print(f"正在获取标的详情并计算回撤、交易量指标...")
+    print(f"正在获取标的详情并计算各项指标...")
     for s in symbols:
         data = get_stock_details(s)
         if data:
             results.append(data)
-        time.sleep(0.15) # 稳健的频控，防止被雅虎拉黑
+        time.sleep(0.15)
 
-    # 核心需求：按“交易金额”从大到小进行降序排序
     results.sort(key=lambda x: x['turnover'], reverse=True)
-    
-    # 精确拦截交易金额前 20 的活跃标的
     top_20 = results[:20]
 
     if not top_20:
         print("未收集到足够的行情数据。")
         return
 
-    # 构建美化版的 Telegram 报表
     msg = "📊 *纳斯达克100 · 交易额 Top20 监控*\n"
     msg += "*(数据按当日交易金额降序排列)*\n\n"
     
@@ -130,19 +125,17 @@ def main():
         msg += f" {change_icon} 当日涨跌: `{change_sign}{s['daily_change']}%`\n"
         msg += f" 📉 5年高点回撤: `{s['drawdown']}%`\n\n"
 
-    # 发送通道选择
     if TG_TOKEN and TG_CHAT_ID:
         tg_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
         try:
             res = requests.post(tg_url, json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
             if res.status_code == 200:
-                print("✨ 纳指100 最新情报已成功推送到 Telegram！")
+                print("✨ 自动推送成功！")
             else:
                 print(f"TG 渠道返回错误: {res.text}")
         except Exception as e:
             print(f"TG 通信异常: {e}")
     else:
-        print("未检测到 TG 机器人配置，直接在控制台输出：\n")
         print(msg)
 
 if __name__ == "__main__":
