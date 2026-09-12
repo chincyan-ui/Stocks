@@ -1,4 +1,4 @@
-import os
+import json
 import requests
 from bs4 import BeautifulSoup
 
@@ -32,41 +32,11 @@ def main():
     stock_list = [{"symbol": s} for s in sorted(list(symbols))]
     print(f"Total unique stocks: {len(stock_list)}")
 
-    # 2. 同步更新到 GitHub Issue
-    token = os.environ.get("GH_TOKEN")
-    repo = os.environ.get("REPO")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json"
-    }
-    
-    # 查找是否存在标题为 "Daily Stock List Data" 的 Issue
-    issues_url = f"https://api.github.com/repos/{repo}/issues?state=open"
-    res = requests.get(issues_url, headers=headers)
-    issue_number = None
-    
-    if res.status_code == 200:
-        for issue in res.json():
-            if issue["title"] == "Daily Stock List Data":
-                issue_number = issue["number"]
-                break
-                
-    import json
+    # 2. 自动生成 GitHub Actions 需要的 issue_body.md 文件
     body_content = f"```json\n{json.dumps(stock_list, ensure_ascii=False)}\n```"
-
-    if issue_number:
-        # 更新现有 Issue
-        update_url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
-        requests.patch(update_url, headers=headers, json={"body": body_content})
-        print(f"Updated Issue #{issue_number}")
-    else:
-        # 创建新 Issue
-        create_url = f"https://api.github.com/repos/{repo}/issues"
-        requests.post(create_url, headers=headers, json={
-            "title": "Daily Stock List Data",
-            "body": body_content
-        })
-        print("Created new Issue for stock list")
+    with open("issue_body.md", "w", encoding="utf-8") as f:
+        f.write(body_content)
+    print("Successfully generated issue_body.md")
 
 if __name__ == "__main__":
     main()
