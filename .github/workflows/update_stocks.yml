@@ -7,11 +7,11 @@ on:
 
 jobs:
   update-issue:
-  
     runs-on: ubuntu-latest
     permissions:
-      issues: write # 赋予操作 Issue 的权限
-      
+      contents: read   # 修复点：必须显式声明读取代码仓库的权限
+      issues: write    # 赋予操作 Issue 的权限
+   
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
