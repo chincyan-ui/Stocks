@@ -1,23 +1,34 @@
 import json
+import time
 import requests
-from bs4 import BeautifulSoup
 import yfinance as yf
 
-def get_wiki_symbols(url, selector):
+def get_sec_symbols():
+    """从 SEC 官方接口获取所有公司的股票代码"""
     symbols = set()
+    # SEC 要求 User-Agent 包含有效的联系方式（例如你的应用名和邮箱）
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
+    url = "https://www.sec.gov/files/company_tickers.json"
+    
     try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        res = requests.get(url, headers=headers)
         if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            rows = soup.select(selector)
-            for row in rows[1:]:
-                cols = row.select('td')
-                if cols:
-                    sym = cols[0].text.strip().replace(' ', '-').replace('.', '-')
-                    if sym:
-                        symbols.add(sym)
+            data = res.json()
+            # SEC 返回的 json 格式形如: {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}, ...}
+            for item in data.values():
+                sym = item.get("ticker")
+                if sym:
+                    # 格式化兼容（将空格或点替换为连字符）
+                    sym = sym.strip().replace(' ', '-').replace('.', '-')
+                    symbols.add(sym)
+            print(f"Successfully fetched {len(symbols)} symbols from SEC.")
+        else:
+            print(f"Error fetching SEC data: Status code {res.status_code}")
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        print(f"Error fetching SEC tickers: {e}")
+        
     return symbols
 
 def filter_by_market_cap(symbols, min_cap=100_000_000_000):
@@ -37,20 +48,17 @@ def filter_by_market_cap(symbols, min_cap=100_000_000_000):
                 print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
             else:
                 print(f"[Skip] {sym}: 市值低于1000亿或获取失败")
+            
+            # 适当延时，避免请求过于频繁触发限制
+            time.sleep(0.5)
         except Exception as e:
             print(f"[Error] 获取 {sym} 市值失败: {e}")
             
     return filtered_symbols
 
 def main():
-    # 1. 抓取标普 500 和 纳指 100
-    symbols = {"SPCH"}
-    
-    sp500 = get_wiki_symbols("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 'table#constituents tr')
-    nd100 = get_wiki_symbols("https://en.wikipedia.org/wiki/Nasdaq-100", 'table#constituents tr')
-    
-    symbols.update(sp500)
-    symbols.update(nd100)
+    # 1. 从 SEC 抓取所有股票代码
+    symbols = get_sec_symbols()
     
     # 2. 筛选市值在 1000 亿美元以上的代码
     large_cap_symbols = filter_by_market_cap(symbols, min_cap=100_000_000_000)
