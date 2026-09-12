@@ -74,3 +74,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# 假设你的筛选结果保存在 filtered_symbols 变量中
+# 将结果写入 issue_body.md 供 GitHub Actions 使用
+with open("issue_body.md", "w", encoding="utf-8") as f:
+    f.write("### 美股市值大于1000亿美元股票列表\n\n")
+    f.write(f"- **总计数量**: {len(filtered_symbols)}\n")
+    f.write(f"- **更新时间**: 自动化脚本运行完成\n\n")
+    f.write("| 股票代码 |\n")
+    f.write("| :-- |\n")
+    for sym in sorted(filtered_symbols):
+        f.write(f"| {sym} |\n")
