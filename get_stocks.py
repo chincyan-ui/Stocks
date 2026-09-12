@@ -31,26 +31,30 @@ def get_sec_symbols():
     return symbols
 
 def filter_by_market_cap(symbols, min_cap=100_000_000_000):
-    """过滤市值在 min_cap（默认1000亿美元）以上的股票"""
+    """使用 fast_info 仅获取市值，大幅提升速度"""
     filtered_symbols = []
     print(f"Checking market cap for {len(symbols)} stocks...")
     
     for sym in sorted(list(symbols)):
         try:
             ticker = yf.Ticker(sym)
-            market_cap = ticker.info.get("marketCap", 0)
+            
+            # 使用 fast_info 代替 ticker.info，只加载基础盘口与市值，速度极快
+            market_cap = ticker.fast_info.get("market_cap", 0)
             
             if market_cap and market_cap >= min_cap:
                 filtered_symbols.append(sym)
                 print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
             else:
                 print(f"[Skip] {sym}: 市值低于1000亿或获取失败")
-            
-            time.sleep(0.3)
+                
+            # 缩短等待时间，因为 fast_info 的开销非常小
+            time.sleep(0.1)
         except Exception as e:
             print(f"[Error] 获取 {sym} 市值失败: {e}")
             
     return filtered_symbols
+            
 
 def main():
     # 1. 从 SEC 抓取所有股票代码
