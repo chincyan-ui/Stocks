@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import requests
 import yfinance as yf
@@ -11,16 +12,14 @@ def get_all_us_tickers():
     url_nasdaq = (
         "http://ftp.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
     )
-    res = requests.get(url_nasdaq)
+    res = requests.get(url_nasdaq, timeout=10)
     for line in res.text.splitlines()[1:-1]:
       parts = line.split("|")
       if len(parts) > 0:
         ticker = parts[0]
-        # 替换特殊字符（如美股中的 BRK.B 对应 Yahoo 的 BRK-B）
         if "." in ticker:
           ticker = ticker.replace(".", "-")
-        # 排除测试股票或优先股等（可选）
-        if "^" not in ticker:
+        if "^" not in ticker and "$" not in ticker:
           tickers.add(ticker)
   except Exception as e:
     print(f"Error fetching NASDAQ tickers: {e}")
@@ -28,15 +27,14 @@ def get_all_us_tickers():
   # 2. 获取其他交易所（NYSE, AMEX 等）上市股票列表
   try:
     url_other = "http://ftp.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
-    res = requests.get(url_other)
+    res = requests.get(url_other, timeout=10)
     for line in res.text.splitlines()[1:-1]:
       parts = line.split("|")
-      # parts[4] 通常为 ETF 标记 ("N" 表示非 ETF)，可根据需要决定是否过滤 ETF
       if len(parts) > 4:
         ticker = parts[0]
         if "." in ticker:
           ticker = ticker.replace(".", "-")
-        if "^" not in ticker:
+        if "^" not in ticker and "$" not in ticker:
           tickers.add(ticker)
   except Exception as e:
     print(f"Error fetching other listed tickers: {e}")
@@ -44,27 +42,50 @@ def get_all_us_tickers():
   return list(tickers)
 
 
-# 获取全量美股代码
-print("正在从 NASDAQ 官方目录下载全量美股代码...")
-all_tickers = get_all_us_tickers()
-print(f"共获取到 {len(all_tickers)} 个代码，开始遍历筛选市值...")
-
-large_caps = []
-
-# 遍历全量股票检查市值
-for ticker in all_tickers:
+def fetch_stock_cap(ticker):
   try:
     stock = yf.Ticker(ticker)
-    # 优先使用 fast_info 加快获取速度，若无则降级使用 info
-    market_cap = stock.fast_info.get("market_cap", 0)
+    # 优先使用 fast_info
+    market_cap = None
+    try:
+      market_cap = stock.fast_info.get("market_cap", 0)
+    except Exception:
+      pass
+
     if not market_cap:
       market_cap = stock.info.get("marketCap", 0)
 
     if market_cap and market_cap > 100e9:
-      large_caps.append((ticker, market_cap))
-      print(f"[Match] {ticker}: ${market_cap:,.0f}")
+      return (ticker, market_cap)
   except Exception:
-    continue
+    pass
+  return None
+
+
+# 获取全量美股代码
+print("正在从 NASDAQ 官方目录下载全量美股代码...")
+all_tickers = get_all_us_tickers()
+print(f"共获取到 {len(all_tickers)} 个代码，开始多线程并发检查市值...")
+
+large_caps = []
+
+# 使用线程池加速查询并降低单线程阻塞风险
+with ThreadPoolExecutor(max_workers=10) as executor:
+  futures = {
+      executor.submit(fetch_stock_cap, ticker): ticker
+      for ticker in all_tickers
+  }
+  for future in as_completed(futures):
+    result = future.result()
+    if result:
+      large_caps.append(result)
+      print(f"[Match] {result[0]}: ${result[1]:,.0f}")
+
+# 关键校验：如果没抓到任何数据，直接抛出异常，防止生成空白 Issue
+if len(large_caps) == 0:
+  raise ValueError(
+      "错误：未抓取到任何市值大于1000亿的股票，可能是触发了接口限制。"
+  )
 
 # 按市值降序排序
 large_caps.sort(key=lambda x: x[1], reverse=True)
