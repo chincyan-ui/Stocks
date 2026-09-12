@@ -1,23 +1,68 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-import requests
+import pandas as pd
 import yfinance as yf
 
 
-def get_all_us_tickers():
-  # 改用稳定维护的 GitHub 开源美股全量代码文件，避免官方 FTP 在云端超时
-  url = "https://raw.githubusercontent.com/nvstly/symbols/main/all_tickers.txt"
+def get_target_tickers():
+  tickers = set()
+
+  # 1. 获取标普 500 (S&P 500) 成分股代码表（维基百科官方表格，极稳定）
   try:
-    res = requests.get(url, timeout=15)
-    tickers = [
-        line.strip().replace(".", "-")
-        for line in res.text.splitlines()
-        if line.strip() and "^" not in line and "$" not in line
-    ]
-    return list(set(tickers))
+    url_sp500 = (
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    )
+    df_list = pd.read_html(url_sp500)
+    sp500_tickers = df_list[0]["Symbol"].tolist()
+    for t in sp500_tickers:
+      tickers.add(t.replace(".", "-"))
   except Exception as e:
-    print(f"Error fetching tickers from mirror: {e}")
-    return []
+    print(f"Error fetching S&P 500 tickers: {e}")
+
+  # 2. 获取纳斯达克 100 (Nasdaq 100) 成分股代码表
+  try:
+    url_ndx = (
+        "https://en.wikipedia.org/wiki/Nasdaq-100"
+    )
+    df_list = pd.read_html(url_ndx)
+    # 查找包含 Symbol 或 Ticker 的表格
+    for df in df_list:
+      for col in ["Company", "Ticker", "Symbol"]:
+        if col in df.columns:
+          for t in df[col].tolist():
+            if isinstance(t, str) and len(t) <= 5:
+              tickers.add(t.replace(".", "-"))
+          break
+  except Exception as e:
+    print(f"Error fetching Nasdaq 100 tickers: {e}")
+
+  # 补充一些常见的巨无霸或跨国大市值股以防万复
+  extra_stocks = [
+      "BRK-B",
+      "TSM",
+      "NVO",
+      "ASML",
+      "LLY",
+      "V",
+      "WMT",
+      "JPM",
+      "XOM",
+      "MA",
+      "UNH",
+      "PG",
+      "JNJ",
+      "HD",
+      "COST",
+      "ABBV",
+      "BAC",
+      "NFLX",
+      "KO",
+      "PEP",
+  ]
+  for t in extra_stocks:
+    tickers.add(t)
+
+  return list(tickers)
 
 
 def fetch_stock_cap(ticker):
@@ -39,13 +84,14 @@ def fetch_stock_cap(ticker):
   return None
 
 
-print("正在从稳定镜像源获取全量美股代码...")
-all_tickers = get_all_us_tickers()
-print(f"共获取到 {len(all_tickers)} 个代码，开始多线程并发检查市值...")
+print("正在获取标普500与纳斯达克100核心股票池...")
+all_tickers = get_target_tickers()
+print(f"共获取到 {len(all_tickers)} 个核心大盘股票代码，开始多线程并发检查市值...")
 
 large_caps = []
 
-with ThreadPoolExecutor(max_workers=10) as executor:
+# 因为总数精简到了 500 左右，用 5 个线程稳妥请求，极大避免被 Yahoo 封锁
+with ThreadPoolExecutor(max_workers=5) as executor:
   futures = {
       executor.submit(fetch_stock_cap, ticker): ticker
       for ticker in all_tickers
@@ -56,11 +102,15 @@ with ThreadPoolExecutor(max_workers=10) as executor:
       large_caps.append(result)
       print(f"[Match] {result[0]}: ${result[1]:,.0f}")
 
-if len(large_caps) == 0:
-  raise ValueError("错误：未抓取到任何市值大于1000亿的股票。")
+if len(large_caps) < 10:
+  raise ValueError(
+      "错误：抓取到的千亿市值股票数量异常偏少，可能触发了限制。"
+  )
 
+# 按市值降序排序
 large_caps.sort(key=lambda x: x[1], reverse=True)
 
+# 生成 Markdown 内容
 date_str = datetime.now().strftime("%Y-%m-%d")
 content = f"### 美股市值 > 1000亿美元股票列表 ({date_str})\n\n"
 content += "| 股票代码 | 市值 (美元) |\n| :--- | :--- |\n"
