@@ -1,0 +1,49 @@
+name: Update US Large Cap Stocks Issue
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天 UTC 0点（北京时间 8点）自动运行
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  update-issue:
+  
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # 赋予操作 Issue 的权限
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance
+
+      - name: Run script to fetch stocks
+        run: python get_stocks.py
+
+      - name: Create or Update GitHub Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TITLE="美股市值大于1000亿美元股票汇总（自动更新）"
+          
+          # 检查是否存在同名的 Open 状态 Issue
+          ISSUE_NUMBER=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number')
+          
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # 不存在则创建新 Issue
+            gh issue create --title "$TITLE" --body-file "issue_body.md"
+            echo "Created new issue."
+          else
+            # 存在则更新该 Issue 内容
+            gh issue edit "$ISSUE_NUMBER" --body-file "issue_body.md"
+            echo "Updated existing issue #$ISSUE_NUMBER."
+          fi
