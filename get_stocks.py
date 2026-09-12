@@ -5,47 +5,24 @@ import yfinance as yf
 
 
 def get_all_us_tickers():
-  tickers = set()
-
-  # 1. 获取 NASDAQ 上市股票列表
+  # 改用稳定维护的 GitHub 开源美股全量代码文件，避免官方 FTP 在云端超时
+  url = "https://raw.githubusercontent.com/nvstly/symbols/main/all_tickers.txt"
   try:
-    url_nasdaq = (
-        "http://ftp.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
-    )
-    res = requests.get(url_nasdaq, timeout=10)
-    for line in res.text.splitlines()[1:-1]:
-      parts = line.split("|")
-      if len(parts) > 0:
-        ticker = parts[0]
-        if "." in ticker:
-          ticker = ticker.replace(".", "-")
-        if "^" not in ticker and "$" not in ticker:
-          tickers.add(ticker)
+    res = requests.get(url, timeout=15)
+    tickers = [
+        line.strip().replace(".", "-")
+        for line in res.text.splitlines()
+        if line.strip() and "^" not in line and "$" not in line
+    ]
+    return list(set(tickers))
   except Exception as e:
-    print(f"Error fetching NASDAQ tickers: {e}")
-
-  # 2. 获取其他交易所（NYSE, AMEX 等）上市股票列表
-  try:
-    url_other = "http://ftp.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
-    res = requests.get(url_other, timeout=10)
-    for line in res.text.splitlines()[1:-1]:
-      parts = line.split("|")
-      if len(parts) > 4:
-        ticker = parts[0]
-        if "." in ticker:
-          ticker = ticker.replace(".", "-")
-        if "^" not in ticker and "$" not in ticker:
-          tickers.add(ticker)
-  except Exception as e:
-    print(f"Error fetching other listed tickers: {e}")
-
-  return list(tickers)
+    print(f"Error fetching tickers from mirror: {e}")
+    return []
 
 
 def fetch_stock_cap(ticker):
   try:
     stock = yf.Ticker(ticker)
-    # 优先使用 fast_info
     market_cap = None
     try:
       market_cap = stock.fast_info.get("market_cap", 0)
@@ -62,14 +39,12 @@ def fetch_stock_cap(ticker):
   return None
 
 
-# 获取全量美股代码
-print("正在从 NASDAQ 官方目录下载全量美股代码...")
+print("正在从稳定镜像源获取全量美股代码...")
 all_tickers = get_all_us_tickers()
 print(f"共获取到 {len(all_tickers)} 个代码，开始多线程并发检查市值...")
 
 large_caps = []
 
-# 使用线程池加速查询并降低单线程阻塞风险
 with ThreadPoolExecutor(max_workers=10) as executor:
   futures = {
       executor.submit(fetch_stock_cap, ticker): ticker
@@ -81,16 +56,11 @@ with ThreadPoolExecutor(max_workers=10) as executor:
       large_caps.append(result)
       print(f"[Match] {result[0]}: ${result[1]:,.0f}")
 
-# 关键校验：如果没抓到任何数据，直接抛出异常，防止生成空白 Issue
 if len(large_caps) == 0:
-  raise ValueError(
-      "错误：未抓取到任何市值大于1000亿的股票，可能是触发了接口限制。"
-  )
+  raise ValueError("错误：未抓取到任何市值大于1000亿的股票。")
 
-# 按市值降序排序
 large_caps.sort(key=lambda x: x[1], reverse=True)
 
-# 生成 Markdown 内容
 date_str = datetime.now().strftime("%Y-%m-%d")
 content = f"### 美股市值 > 1000亿美元股票列表 ({date_str})\n\n"
 content += "| 股票代码 | 市值 (美元) |\n| :--- | :--- |\n"
