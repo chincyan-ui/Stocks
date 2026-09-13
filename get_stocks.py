@@ -31,30 +31,26 @@ def get_sec_symbols():
     return symbols
 
 def filter_by_market_cap(symbols, min_cap=100_000_000_000):
-    """使用 fast_info 仅获取市值，大幅提升速度"""
+    """过滤市值在 min_cap（默认1000亿美元）以上的股票"""
     filtered_symbols = []
     print(f"Checking market cap for {len(symbols)} stocks...")
     
     for sym in sorted(list(symbols)):
         try:
             ticker = yf.Ticker(sym)
-            
-            # 使用 fast_info 代替 ticker.info，只加载基础盘口与市值，速度极快
-            market_cap = ticker.fast_info.get("market_cap", 0)
+            market_cap = ticker.info.get("marketCap", 0)
             
             if market_cap and market_cap >= min_cap:
                 filtered_symbols.append(sym)
                 print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
             else:
                 print(f"[Skip] {sym}: 市值低于1000亿或获取失败")
-                
-            # 缩短等待时间，因为 fast_info 的开销非常小
-            time.sleep(0.1)
+            
+            time.sleep(0.3)
         except Exception as e:
             print(f"[Error] 获取 {sym} 市值失败: {e}")
             
     return filtered_symbols
-            
 
 def main():
     # 1. 从 SEC 抓取所有股票代码
@@ -74,14 +70,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# 假设你的筛选结果保存在 filtered_symbols 变量中
-# 将结果写入 issue_body.md 供 GitHub Actions 使用
-with open("issue_body.md", "w", encoding="utf-8") as f:
-    f.write("### 美股市值大于1000亿美元股票列表\n\n")
-    f.write(f"- **总计数量**: {len(filtered_symbols)}\n")
-    f.write(f"- **更新时间**: 自动化脚本运行完成\n\n")
-    f.write("| 股票代码 |\n")
-    f.write("| :-- |\n")
-    for sym in sorted(filtered_symbols):
-        f.write(f"| {sym} |\n")
