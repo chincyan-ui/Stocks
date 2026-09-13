@@ -26,7 +26,7 @@ jobs:
           pip install yfinance
 
       - name: Run script to fetch stocks
-        run: python get_stocks.py
+        run: python get_stocks1.py
 
       - name: Create or Update GitHub Issue
         env:
