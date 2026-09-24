@@ -57,8 +57,6 @@ def filter_by_market_cap(symbols, min_cap=100_000_000_000):
                         if market_cap >= min_cap:
                             filtered_symbols.append(sym)
                             print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
-                        else:
-                            print(f"[Skip] {sym}: 市值低于1000亿")
                     else:
                         print(f"[Skip] {sym}: 未获取到市值数据")
             
