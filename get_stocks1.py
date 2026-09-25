@@ -12,7 +12,7 @@ def get_sec_symbols():
     url = "https://www.sec.gov/files/company_tickers.json"
     
     try:
-        res = requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers, timeout=10)
         print(f"SEC API Response Status: {res.status_code}")
         if res.status_code == 200:
             data = res.json()
@@ -28,41 +28,66 @@ def get_sec_symbols():
         
     return symbols
 
-def filter_by_market_cap(symbols, min_cap=100_000_000_000):
-    """通过新浪财经接口过滤市值在 min_cap（默认1000亿美元）以上的股票"""
+def filter_by_market_cap(symbols, min_cap=100_000_000_000, chunk_size=50):
+    """通过新浪财经接口批量过滤市值在 min_cap（默认1000亿美元）以上的股票"""
     filtered_symbols = []
-    print(f"Checking market cap for {len(symbols)} stocks via Sina API...")
+    symbol_list = sorted(list(symbols))
+    total = len(symbol_list)
+    print(f"Checking market cap for {total} stocks via Sina API (Batch Mode)...")
     
     headers = {
         "Referer": "http://finance.sina.com.cn",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
     
-    for sym in sorted(list(symbols)):
-        try:
-            # 参照新浪美股代码规则：小写、将点和连字符转为 $（如 BRK.A 或 BRK-A 转换为 brk$a）
+    session = requests.Session()
+    session.headers.update(headers)
+    
+    # 分批处理，每批查询 chunk_size 个股票
+    for i in range(0, total, chunk_size):
+        chunk = symbol_list[i:i + chunk_size]
+        
+        # 转换为新浪美股代码格式并拼接
+        sina_codes = []
+        code_to_sym = {}
+        for sym in chunk:
             sina_sym = sym.lower().replace('.', '$').replace('-', '$')
             code = f"gb_{sina_sym}"
+            sina_codes.append(code)
+            code_to_sym[code] = sym
             
-            url = f"http://hq.sinajs.cn/list={code}"
-            res = requests.get(url, headers=headers, timeout=5)
-            
+        url = f"http://hq.sinajs.cn/list={','.join(sina_codes)}"
+        
+        try:
+            res = session.get(url, timeout=5)
             if res.status_code == 200:
-                match = re.search(r'\"(.*?)\"', res.text)
-                if match and match.group(1):
-                    p = match.group(1).split(",")
-                    # 新浪美股数据中，p[12] 为总市值（单位：美元）
-                    if len(p) > 12 and p[12]:
-                        market_cap = float(p[12])
-                        if market_cap >= min_cap:
-                            filtered_symbols.append(sym)
-                            print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
-                    else:
-                        print(f"[Skip] {sym}: 未获取到市值数据")
-            
-            time.sleep(0.2)
+                # 解析返回的多行数据
+                lines = res.text.strip().split(';')
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    # 匹配格式: var hq_str_gb_aapl="...";
+                    match_code = re.search(r'hq_str_(gb_[^=]+)=\"(.*?)\"', line)
+                    if match_code:
+                        code = match_code.group(1)
+                        content = match_code.group(2)
+                        sym = code_to_sym.get(code)
+                        
+                        if content:
+                            p = content.split(",")
+                            # 新浪美股数据中，p[12] 为总市值
+                            if len(p) > 12 and p[12]:
+                                try:
+                                    market_cap = float(p[12])
+                                    if market_cap >= min_cap:
+                                        filtered_symbols.append(sym)
+                                        print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
+                                except ValueError:
+                                    continue
+            # 适当延时，防止请求过于频繁被新浪封禁
+            time.sleep(0.1)
         except Exception as e:
-            print(f"[Error] 获取 {sym} 市值失败: {e}")
+            print(f"[Error] 批量获取市值失败 (Batch {i}-{i+chunk_size}): {e}")
             
     return filtered_symbols
 
@@ -70,6 +95,10 @@ def main():
     # 1. 从 SEC 抓取所有股票代码
     symbols = get_sec_symbols()
     
+    if not symbols:
+        print("未获取到任何 SEC 股票代码，程序终止。")
+        return
+        
     # 2. 通过新浪财经接口筛选市值在 1000 亿美元以上的代码
     large_cap_symbols = filter_by_market_cap(symbols, min_cap=100_000_000_000)
     
