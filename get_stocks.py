@@ -1,72 +1,155 @@
 import json
 import time
 import requests
+import re
+import logging
 import yfinance as yf
+
+# 配置日志记录格式，适配 CI/CD 环境
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 def get_sec_symbols():
     """从 SEC 官方接口获取所有公司的股票代码"""
     symbols = set()
-    # SEC 强制要求：User-Agent 必须包含应用名称和真实联系邮箱
     headers = {
         "User-Agent": "MyStockCheckerApp chincyan@gmail.com"
     }
     url = "https://www.sec.gov/files/company_tickers.json"
     
     try:
-        res = requests.get(url, headers=headers)
-        print(f"SEC API Response Status: {res.status_code}")
+        res = requests.get(url, headers=headers, timeout=10)
+        logging.info(f"SEC API Response Status: {res.status_code}")
         if res.status_code == 200:
             data = res.json()
             for item in data.values():
                 sym = item.get("ticker")
                 if sym:
-                    sym = sym.strip().replace(' ', '-').replace('.', '-')
-                    symbols.add(sym)
-            print(f"Successfully fetched {len(symbols)} symbols from SEC.")
+                    symbols.add(sym.strip())
+            logging.info(f"Successfully fetched {len(symbols)} symbols from SEC.")
         else:
-            print(f"Error fetching SEC data: Status code {res.status_code}")
+            logging.error(f"Error fetching SEC data: Status code {res.status_code}")
     except Exception as e:
-        print(f"Error fetching SEC tickers: {e}")
+        logging.error(f"Error fetching SEC tickers: {e}")
         
     return symbols
 
-def filter_by_market_cap(symbols, min_cap=100_000_000_000):
-    """过滤市值在 min_cap（默认1000亿美元）以上的股票"""
+def filter_by_market_cap_yfinance(symbols, min_cap=100_000_000_000):
+    """【备用方案】使用 yfinance 逐个获取市值（适合新浪接口失效时作为兜底）"""
+    logging.info("Switching to backup data source: yfinance (Fast Info)...")
     filtered_symbols = []
-    print(f"Checking market cap for {len(symbols)} stocks...")
+    symbol_list = sorted(list(symbols))
     
-    for sym in sorted(list(symbols)):
+    for sym in symbol_list:
         try:
             ticker = yf.Ticker(sym)
-            market_cap = ticker.info.get("marketCap", 0)
-            
+            # 使用 fast_info 获取市值，比完整的 .info 更加高效
+            market_cap = ticker.fast_info.get("market_cap", 0)
             if market_cap and market_cap >= min_cap:
                 filtered_symbols.append(sym)
-                print(f"[Pass] {sym}: ${market_cap / 1e9:.2f}B")
-            else:
-                print(f"[Skip] {sym}: 市值低于1000亿或获取失败")
-            
-            time.sleep(0.3)
+                logging.info(f"[Pass - YF] {sym}: ${market_cap / 1e9:.2f}B")
         except Exception as e:
-            print(f"[Error] 获取 {sym} 市值失败: {e}")
+            # 忽略部分已退市或 yfinance 无法解析的特殊代码
+            continue
             
+    return filtered_symbols
+
+def filter_by_market_cap(symbols, min_cap=100_000_000_000, chunk_size=50):
+    """通过新浪财经接口批量过滤市值，若失败则自动降级使用 yfinance"""
+    filtered_symbols = []
+    symbol_list = sorted(list(symbols))
+    total = len(symbol_list)
+    logging.info(f"Checking market cap for {total} stocks via Sina API (Batch Mode)...")
+    
+    headers = {
+        "Referer": "http://finance.sina.com.cn",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+    
+    session = requests.Session()
+    session.headers.update(headers)
+    
+    sina_failed = False
+    success_batches = 0
+    
+    # 分批处理，每批查询 chunk_size 个股票
+    for i in range(0, total, chunk_size):
+        chunk = symbol_list[i:i + chunk_size]
+        
+        sina_codes = []
+        code_to_sym = {}
+        for sym in chunk:
+            sina_sym = sym.lower().replace('.', '$').replace('-', '$')
+            code = f"gb_{sina_sym}"
+            sina_codes.append(code)
+            code_to_sym[code] = sym
+            
+        url = f"http://hq.sinajs.cn/list={','.join(sina_codes)}"
+        
+        try:
+            res = session.get(url, timeout=5)
+            if res.status_code == 200:
+                lines = res.text.strip().split(';')
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    match_code = re.search(r'hq_str_(gb_[^=]+)=\"(.*?)\"', line)
+                    if match_code:
+                        code = match_code.group(1)
+                        content = match_code.group(2)
+                        sym = code_to_sym.get(code)
+                        
+                        if content:
+                            p = content.split(",")
+                            if len(p) > 12 and p[12]:
+                                try:
+                                    market_cap = float(p[12])
+                                    if market_cap >= min_cap:
+                                        filtered_symbols.append(sym)
+                                        logging.info(f"[Pass - Sina] {sym}: ${market_cap / 1e9:.2f}B")
+                                except ValueError:
+                                    continue
+                success_batches += 1
+            else:
+                logging.warning(f"Sina API returned status code {res.status_code} at batch {i}-{i+chunk_size}")
+                sina_failed = True
+                break
+                
+            time.sleep(0.1)
+        except Exception as e:
+            logging.warning(f"Sina API batch request failed ({i}-{i+chunk_size}): {e}")
+            sina_failed = True
+            break
+            
+    # 容灾兜底逻辑：如果新浪接口整体报错、被墙或未能正常拉取到数据，切换至 yfinance
+    if sina_failed or (success_batches == 0 and total > 0):
+        logging.warning("Sina API is unavailable or blocked. Triggering fallback to yfinance...")
+        return filter_by_market_cap_yfinance(symbols, min_cap)
+        
     return filtered_symbols
 
 def main():
     # 1. 从 SEC 抓取所有股票代码
     symbols = get_sec_symbols()
     
-    # 2. 筛选市值在 1000 亿美元以上的代码
+    if not symbols:
+        logging.critical("未获取到任何 SEC 股票代码，程序终止。")
+        return
+        
+    # 2. 筛选市值在 1000 亿美元以上的代码（带主备自动切换）
     large_cap_symbols = filter_by_market_cap(symbols, min_cap=100_000_000_000)
     
     stock_list = [{"symbol": s} for s in sorted(large_cap_symbols)]
-    print(f"Total unique stocks with market cap > $100B: {len(stock_list)}")
+    logging.info(f"Total unique stocks with market cap > $100B: {len(stock_list)}")
 
     # 3. 自动生成 GitHub Actions 需要的 issue_body.md 文件
     body_content = f"```json\n{json.dumps(stock_list, ensure_ascii=False)}\n```"
     with open("issue_body.md", "w", encoding="utf-8") as f:
         f.write(body_content)
-    print("Successfully generated issue_body.md")
+    logging.info("Successfully generated issue_body.md")
 
 if __name__ == "__main__":
     main()
