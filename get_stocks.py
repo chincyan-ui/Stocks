@@ -4,6 +4,8 @@ import requests
 import re
 import logging
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # 配置日志记录格式，适配 CI/CD 环境
 logging.basicConfig(
@@ -37,28 +39,49 @@ def get_sec_symbols():
         
     return symbols
 
-def filter_by_market_cap_yfinance(symbols, min_cap=100_000_000_000):
-    """【备用方案】使用 yfinance 逐个获取市值（适合新浪接口失效时作为兜底）"""
-    logging.info("Switching to backup data source: yfinance (Fast Info)...")
+def _fetch_single_yfinance_cap(sym, min_cap):
+    """单只股票的 yfinance 查询子函数（用于多线程调用）"""
+    try:
+        ticker = yf.Ticker(sym)
+        # 使用 fast_info 获取市值
+        market_cap = ticker.fast_info.get("market_cap", 0)
+        if market_cap and market_cap >= min_cap:
+            logging.info(f"[Pass - YF] {sym}: ${market_cap / 1e9:.2f}B")
+            return sym
+    except Exception as e:
+        # 忽略退市或解析异常的股票
+        pass
+    return None
+
+def filter_by_market_cap_yfinance(symbols, min_cap=100_000_000_000, max_workers=20):
+    """【多线程备用方案】使用线程池并发通过 yfinance 获取市值，大幅提升降级查询效率"""
+    logging.info(f"Switching to backup data source: yfinance (Multi-threaded, workers={max_workers})...")
     filtered_symbols = []
     symbol_list = sorted(list(symbols))
     
-    for sym in symbol_list:
-        try:
-            ticker = yf.Ticker(sym)
-            # 使用 fast_info 获取市值，比完整的 .info 更加高效
-            market_cap = ticker.fast_info.get("market_cap", 0)
-            if market_cap and market_cap >= min_cap:
-                filtered_symbols.append(sym)
-                logging.info(f"[Pass - YF] {sym}: ${market_cap / 1e9:.2f}B")
-        except Exception as e:
-            # 忽略部分已退市或 yfinance 无法解析的特殊代码
-            continue
-            
+    # 线程安全锁，用于保护共享列表的写入
+    lock = threading.Lock()
+    
+    def worker(sym):
+        result = _fetch_single_yfinance_cap(sym, min_cap)
+        if result:
+            with lock:
+                filtered_symbols.append(result)
+
+    # 使用 ThreadPoolExecutor 进行并发处理
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(worker, sym) for sym in symbol_list]
+        # 等待所有线程完成
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                pass
+                
     return filtered_symbols
 
 def filter_by_market_cap(symbols, min_cap=100_000_000_000, chunk_size=50):
-    """通过新浪财经接口批量过滤市值，若失败则自动降级使用 yfinance"""
+    """通过新浪财经接口批量过滤市值，若失败则自动降级使用 yfinance（多线程）"""
     filtered_symbols = []
     symbol_list = sorted(list(symbols))
     total = len(symbol_list)
@@ -124,9 +147,9 @@ def filter_by_market_cap(symbols, min_cap=100_000_000_000, chunk_size=50):
             sina_failed = True
             break
             
-    # 容灾兜底逻辑：如果新浪接口整体报错、被墙或未能正常拉取到数据，切换至 yfinance
+    # 容灾兜底逻辑：如果新浪接口整体报错、被墙或未能正常拉取到数据，切换至多线程 yfinance
     if sina_failed or (success_batches == 0 and total > 0):
-        logging.warning("Sina API is unavailable or blocked. Triggering fallback to yfinance...")
+        logging.warning("Sina API is unavailable or blocked. Triggering fallback to multi-threaded yfinance...")
         return filter_by_market_cap_yfinance(symbols, min_cap)
         
     return filtered_symbols
