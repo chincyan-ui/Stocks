@@ -4,7 +4,7 @@ on:
   schedule:
     # 每天北京时间 08:30 运行 (UTC 00:30)
     # 分 时 日 月 周
-    - cron: '30 0 * * *'
+    - cron: '30 16 * * *'
   workflow_dispatch: 
 
 jobs:
