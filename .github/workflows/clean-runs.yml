@@ -16,5 +16,5 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 5   # 保留最近 3 天的记录（您可以根据需要改成 1 或 7）
+          retain_days: 3   # 保留最近 3 天的记录（您可以根据需要改成 1 或 7）
           keep_minimum_runs: 1 # 每个工作流至少保留最近的 1 次运行记录
