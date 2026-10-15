@@ -35,7 +35,7 @@ jobs:
 
       # 4. 运行 Python 脚本
       - name: Run script to fetch stocks
-        run: python get_stocks2.py
+        run: python get_stocks1.py
 
       # 5. 创建或更新 GitHub Issue
       - name: Create or Update GitHub Issue
