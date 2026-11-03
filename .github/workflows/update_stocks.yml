@@ -1,8 +1,6 @@
 name: Update US Large Cap Stocks Issue
 
 on:
-  schedule:
-    - cron: '0 19 * * *' # 每天 UTC 0点（北京时间 8点）自动运行
   workflow_dispatch: # 支持手动触发
 
 jobs:
