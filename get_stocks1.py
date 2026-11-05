@@ -28,8 +28,8 @@ def get_sec_symbols():
         
     return symbols
 
-def filter_by_market_cap(symbols, min_cap=100_000_000_000, chunk_size=50):
-    """通过新浪财经接口批量过滤市值在 min_cap（默认1000亿美元）以上的股票"""
+def filter_by_market_cap(symbols, min_cap=50_000_000_000, chunk_size=50):
+    """通过新浪财经接口批量过滤市值在 min_cap（默认500亿美元）以上的股票"""
     filtered_symbols = []
     symbol_list = sorted(list(symbols))
     total = len(symbol_list)
@@ -99,11 +99,11 @@ def main():
         print("未获取到任何 SEC 股票代码，程序终止。")
         return
         
-    # 2. 通过新浪财经接口筛选市值在 1000 亿美元以上的代码
-    large_cap_symbols = filter_by_market_cap(symbols, min_cap=100_000_000_000)
+    # 2. 通过新浪财经接口筛选市值在 500 亿美元以上的代码
+    large_cap_symbols = filter_by_market_cap(symbols, min_cap=50_000_000_000)
     
     stock_list = [{"symbol": s} for s in sorted(large_cap_symbols)]
-    print(f"Total unique stocks with market cap > $100B: {len(stock_list)}")
+    print(f"Total unique stocks with market cap > $50B: {len(stock_list)}")
 
     # 3. 自动生成 GitHub Actions 需要的 issue_body.md 文件
     body_content = f"```json\n{json.dumps(stock_list, ensure_ascii=False)}\n```"
