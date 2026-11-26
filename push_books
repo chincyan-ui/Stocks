@@ -1,0 +1,249 @@
+import logging
+import os
+import sys
+import time
+from typing import Any
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("daily_books")
+
+
+class ConfigError(Exception):
+    """环境变量配置错误"""
+
+
+class TelegramPushError(Exception):
+    """Telegram 消息推送失败"""
+
+
+def load_config() -> dict[str, Any]:
+    token = os.environ.get("TG_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TG_CHAT_ID", "").strip()
+    zlib_url = os.environ.get("ZLIB_URL", "https://z-library.sk").strip().rstrip("/")
+    zlib_cookie = os.environ.get("ZLIB_COOKIE", "").strip()
+    raw_limit = os.environ.get("BOOK_LIMIT", "10").strip()
+
+    if not token:
+        raise ConfigError("缺少必填环境变量 TG_BOT_TOKEN")
+    if not chat_id:
+        raise ConfigError("缺少必填环境变量 TG_CHAT_ID")
+    if not zlib_url.startswith(("http://", "https://")):
+        raise ConfigError(f"ZLIB_URL 格式无效: {zlib_url}")
+
+    try:
+        book_limit = int(raw_limit)
+        if book_limit <= 0:
+            raise ValueError
+    except ValueError as exc:
+        raise ConfigError(f"BOOK_LIMIT 必须为正整数，当前值: {raw_limit}") from exc
+
+    return {
+        "tg_token": token,
+        "tg_chat_id": chat_id,
+        "zlib_url": zlib_url,
+        "zlib_cookie": zlib_cookie,
+        "book_limit": book_limit,
+    }
+
+
+def build_session(cookie: str = "", total_retries: int = 3, backoff_factor: float = 1.5) -> requests.Session:
+    session = requests.Session()
+
+    retry_strategy = Retry(
+        total=total_retries,
+        connect=total_retries,
+        read=total_retries,
+        status=total_retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=[408, 429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+
+    session.headers.update(headers)
+    return session
+
+
+def fetch_books(session: requests.Session, base_url: str, limit: int) -> list[dict[str, str]]:
+    """
+    从目标站点拉取最多 limit 条书目。
+    此处先请求站点首页/列表接口做连通性验证；若需解析特定列表页或搜索页，
+    可在下方补充 HTML / JSON 解析逻辑。
+    """
+    target_url = f"{base_url}/"
+    logger.info("正在请求书源站点: %s (目标数量: %d)", target_url, limit)
+
+    try:
+        resp = session.get(target_url, timeout=20)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error("请求书源站点失败: %s", exc)
+        return []
+
+    # TODO: 根据实际页面结构或搜索结果提取书目字段：
+    # {"title": "...", "author": "...", "ext": "EPUB", "url": "..."}
+    books: list[dict[str, str]] = []
+    return books[:limit]
+
+
+def escape_markdown_v2(text: str) -> str:
+    """转义 Telegram MarkdownV2 保留字符"""
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join(f"\\{ch}" if ch in special_chars else ch for ch in text)
+
+
+def build_message(books: list[dict[str, str]], use_markdown_v2: bool = False) -> str:
+    if use_markdown_v2:
+        header = f"📚 *今日书单推荐（{len(books)} 本）*\n"
+        lines = [header]
+        for idx, book in enumerate(books, start=1):
+            title = escape_markdown_v2(book.get("title") or "未知书名")
+            author = escape_markdown_v2(book.get("author") or "未知作者")
+            ext = book.get("ext", "").strip()
+            url = book.get("url") or "https://z-library.sk"
+            tag = f" \\[{escape_markdown_v2(ext)}\\]" if ext else ""
+            lines.append(f"{idx}\\. *{title}*{tag} — {author}\n{escape_markdown_v2(url)}")
+        return "\n\n".join(lines)
+
+    lines = [f"📚 今日书单推荐（{len(books)} 本）\n"]
+    for idx, book in enumerate(books, start=1):
+        title = book.get("title") or "未知书名"
+        author = book.get("author") or "未知作者"
+        ext = book.get("ext", "").strip()
+        url = book.get("url") or "https://z-library.sk"
+        tag = f" [{ext}]" if ext else ""
+        lines.append(f"{idx}. {title}{tag} — {author}\n{url}")
+    return "\n\n".join(lines)
+
+
+def send_telegram_message(
+    session: requests.Session,
+    token: str,
+    chat_id: str,
+    text: str,
+    parse_mode: str | None = None,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """
+    发送 Telegram 消息，处理网络异常、HTTP 状态码、429 限流及 API 返回 ok=False 的情况。
+    """
+    endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = session.post(endpoint, json=payload, timeout=20)
+
+            # 处理 Telegram 429 频率限制
+            if resp.status_code == 429:
+                retry_after = 5
+                try:
+                    retry_after = int(resp.json().get("parameters", {}).get("retry_after", 5))
+                except ValueError:
+                    pass
+                logger.warning("触发 Telegram 限流 (429)，%d 秒后重试 (%d/%d)", retry_after, attempt, max_attempts)
+                time.sleep(retry_after)
+                continue
+
+            resp.raise_for_status()
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                raise TelegramPushError(f"Telegram 返回非 JSON 响应: {resp.text[:200]}") from exc
+
+            if not data.get("ok"):
+                description = data.get("description", "未知 API 错误")
+                error_code = data.get("error_code", "N/A")
+                raise TelegramPushError(f"Telegram API 拒绝请求 [code={error_code}]: {description}")
+
+            logger.info("Telegram 消息发送成功 (message_id=%s)", data.get("result", {}).get("message_id"))
+            return data
+
+        except requests.Timeout as exc:
+            last_error = exc
+            logger.warning("请求 Telegram 超时 (%d/%d): %s", attempt, max_attempts, exc)
+        except requests.RequestException as exc:
+            last_error = exc
+            logger.warning("请求 Telegram 网络异常 (%d/%d): %s", attempt, max_attempts, exc)
+        except TelegramPushError as exc:
+            last_error = exc
+            # 若是 Markdown 解析失败，降级为纯文本重试一次
+            if parse_mode and ("can't parse entities" in str(exc).lower() or "parse entities" in str(exc).lower()):
+                logger.warning("Markdown 格式解析失败，切换为纯文本重试")
+                payload.pop("parse_mode", None)
+                parse_mode = None
+                continue
+            logger.error("Telegram 推送业务错误 (%d/%d): %s", attempt, max_attempts, exc)
+
+        if attempt < max_attempts:
+            sleep_sec = 2 * attempt
+            time.sleep(sleep_sec)
+
+    raise TelegramPushError(f"在 {max_attempts} 次尝试后仍未能推送消息") from last_error
+
+
+def main() -> int:
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        logger.error("配置校验失败: %s", exc)
+        return 1
+
+    session = build_session(cookie=cfg["zlib_cookie"])
+    books = fetch_books(session, cfg["zlib_url"], cfg["book_limit"])
+
+    if not books:
+        logger.warning("本次未获取到可推送的书目，跳过发送")
+        return 0
+
+    message = build_message(books, use_markdown_v2=False)
+    try:
+        send_telegram_message(
+            session=session,
+            token=cfg["tg_token"],
+            chat_id=cfg["tg_chat_id"],
+            text=message,
+            parse_mode=None,
+            max_attempts=3,
+        )
+    except TelegramPushError as exc:
+        logger.error("最终推送失败: %s", exc)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
